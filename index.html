@@ -1,0 +1,740 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">
+<title>Wys — Know Your Money</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500;9..40,600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<style>
+:root{
+  --bg:#f7f6f2;--s:#fff;--b:rgba(0,0,0,.08);--bm:rgba(0,0,0,.13);
+  --t:#1a1816;--t2:#6b6762;--t3:#9d9a96;
+  --G:#1a7a4a;--Gb:#e8f5ee;--Gl:#f0faf4;
+  --R:#c0392b;--Rb:#fdf0ee;
+  --A:#92600a;--Ab:#fef9ec;
+  --B:#1a4e8a;--Bb:#eef4fc;
+  --r:14px;--rs:8px;
+  --shl:0 8px 40px rgba(0,0,0,.12);
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%;font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--t);font-size:15px}
+.screen{display:none;min-height:100vh;flex-direction:column}
+.screen.on{display:flex}
+
+/* ── UPLOAD ── */
+#su{background:var(--bg)}
+.topbar{display:flex;align-items:center;justify-content:space-between;padding:17px 20px 15px;background:var(--s);border-bottom:1px solid var(--b);position:sticky;top:0;z-index:10}
+.tl{display:flex;align-items:center;gap:8px}
+.tlm{width:30px;height:30px;background:var(--t);border-radius:8px;display:flex;align-items:center;justify-content:center}
+.tln{font-size:15px;font-weight:600;letter-spacing:-.3px}
+.badge{background:var(--Gb);border:1px solid rgba(26,122,74,.2);border-radius:20px;padding:3px 9px;font-size:11px;color:var(--G);font-weight:500}
+.ubody{padding:22px 20px;max-width:520px;margin:0 auto;width:100%}
+.uh h2{font-size:19px;font-weight:600;letter-spacing:-.4px;margin-bottom:4px}
+.uh p{font-size:13px;color:var(--t2);line-height:1.6;margin-bottom:20px}
+
+.dz{border:2px dashed var(--bm);border-radius:var(--r);padding:30px 18px;text-align:center;cursor:pointer;background:var(--s);transition:all .2s;margin-bottom:10px}
+.dz:hover,.dz.drag{border-color:var(--G);background:var(--Gl)}
+.dz h3{font-size:14px;font-weight:500;margin-bottom:2px}
+.dz p{font-size:12px;color:var(--t2);margin-top:3px}
+.pills{display:flex;gap:4px;justify-content:center;margin-top:8px}
+.pill{font-size:10px;padding:2px 8px;border-radius:20px;background:var(--bg);color:var(--t2);border:1px solid var(--bm);font-weight:500}
+.flist{display:flex;flex-direction:column;gap:5px;margin-bottom:14px}
+.frow{display:flex;align-items:center;gap:8px;background:var(--s);border:1px solid var(--b);border-radius:var(--rs);padding:8px 12px}
+.fi{width:26px;height:26px;border-radius:5px;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.fn{font-size:12px;font-weight:500;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.fz{font-size:11px;color:var(--t3);white-space:nowrap}
+.frb{background:none;border:none;cursor:pointer;color:var(--t3);font-size:17px;line-height:1}
+.frb:hover{color:var(--R)}
+.btn{width:100%;padding:13px;border:none;border-radius:var(--rs);font-family:'DM Sans',sans-serif;font-size:14px;font-weight:600;cursor:pointer;transition:all .15s;margin-top:2px}
+.btn-p{background:var(--t);color:#fff}.btn-p:hover{opacity:.87}
+.btn-g{background:transparent;color:var(--t2);border:1.5px solid var(--bm);margin-top:6px}
+.btn-g:hover{background:var(--bg)}
+
+/* ── PROCESSING ── */
+#sp{background:var(--bg);align-items:center;justify-content:center;padding:32px 20px}
+.pc{width:100%;max-width:360px;background:var(--s);border-radius:20px;padding:32px 28px;box-shadow:var(--shl);text-align:center}
+.spin{width:40px;height:40px;border:3px solid var(--b);border-top-color:var(--G);border-radius:50%;animation:spin .8s linear infinite;margin:0 auto 18px}
+@keyframes spin{to{transform:rotate(360deg)}}
+.ph{font-size:17px;font-weight:600;margin-bottom:4px}
+.ps{font-size:12px;color:var(--t2);margin-bottom:20px}
+.prog{text-align:left;display:flex;flex-direction:column;gap:7px}
+.pr{display:flex;align-items:center;gap:7px;font-size:12px}
+.pdot{width:7px;height:7px;border-radius:50%;flex-shrink:0}
+.pdot.done{background:var(--G)}.pdot.act{background:var(--A);animation:pulse 1s ease-in-out infinite}.pdot.wait{background:var(--bm)}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+.ptxt.done{color:var(--t3);text-decoration:line-through}.ptxt.act{color:var(--t);font-weight:500}.ptxt.wait{color:var(--t3)}
+.perr{background:var(--Rb);border:1px solid rgba(192,57,43,.3);border-radius:var(--rs);padding:11px 13px;font-size:12px;color:var(--R);margin-top:14px;text-align:left;display:none;line-height:1.65}
+.retry{background:var(--t);color:#fff;border:none;border-radius:6px;padding:7px 14px;font-family:'DM Sans',sans-serif;font-size:12px;font-weight:600;cursor:pointer;margin-top:8px}
+
+/* ── REVIEW ── */
+#sr{background:var(--bg)}
+.rev-head{padding:15px 18px 13px;background:var(--s);border-bottom:1px solid var(--b);position:sticky;top:0;z-index:10}
+.rev-title{font-size:15px;font-weight:600;margin-bottom:2px}
+.rev-sub{font-size:12px;color:var(--t2)}
+.rev-filters{display:flex;gap:5px;overflow-x:auto;scrollbar-width:none;padding:7px 16px;background:var(--bg);border-bottom:1px solid var(--b)}
+.rev-filters::-webkit-scrollbar{display:none}
+.rfilt{flex:0 0 auto;padding:4px 11px;border-radius:20px;font-size:11px;font-weight:500;cursor:pointer;color:var(--t2);border:1px solid transparent;transition:all .15s}
+.rfilt.on{background:var(--Gb);color:var(--G);border-color:rgba(26,122,74,.2)}
+.rev-body{padding:12px 16px 32px;max-width:560px;margin:0 auto;width:100%}
+.rev-empty{text-align:center;padding:40px 20px;color:var(--t3);font-size:13px}
+
+.txn-row{
+  display:flex;align-items:center;gap:10px;
+  background:var(--s);border:1px solid var(--b);border-radius:var(--rs);
+  padding:10px 12px;margin-bottom:6px;
+}
+.txn-row.deleted{opacity:.35;pointer-events:none;text-decoration:line-through}
+.txn-date{font-size:11px;color:var(--t3);white-space:nowrap;width:42px;flex-shrink:0}
+.txn-merchant{font-size:12px;font-weight:500;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.txn-amt{font-size:13px;font-weight:600;white-space:nowrap}
+.txn-amt.cr{color:var(--G)}.txn-amt.dr{color:var(--t)}
+.txn-cat{padding:3px 8px;border-radius:12px;font-size:10px;font-weight:600;cursor:pointer;white-space:nowrap;flex-shrink:0;transition:all .15s}
+.txn-cat:hover{opacity:.8}
+.cat-income{background:var(--Gb);color:var(--G)}
+.cat-expenses{background:var(--Rb);color:var(--R)}
+.cat-investments{background:var(--Bb);color:var(--B)}
+.cat-loans{background:#ede8fa;color:#4a2d8c}
+.cat-unknown{background:var(--bg);color:var(--t3);border:1px solid var(--bm)}
+.txn-del{background:none;border:none;cursor:pointer;color:var(--t3);font-size:16px;padding:2px 4px;flex-shrink:0}
+.txn-del:hover{color:var(--R)}
+
+.rev-actions{
+  position:sticky;bottom:0;background:var(--s);border-top:1px solid var(--b);
+  padding:12px 16px;display:flex;gap:8px;align-items:center;max-width:560px;
+}
+.rev-count{font-size:12px;color:var(--t2);flex:1}
+.rev-go-btn{padding:11px 20px;background:var(--t);color:#fff;border:none;border-radius:var(--rs);font-family:'DM Sans',sans-serif;font-size:13px;font-weight:600;cursor:pointer}
+
+/* ── BOTTOM SHEET (category picker) ── */
+.overlay{position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:100;display:none;align-items:flex-end}
+.overlay.on{display:flex}
+.sheet{
+  background:var(--s);border-radius:20px 20px 0 0;
+  width:100%;max-height:75vh;overflow-y:auto;
+  padding:16px 16px 32px;
+}
+.sheet-handle{width:36px;height:4px;background:var(--bm);border-radius:2px;margin:0 auto 16px}
+.sheet-title{font-size:14px;font-weight:600;margin-bottom:12px}
+.cat-group{margin-bottom:16px}
+.cat-group-label{font-size:10px;font-weight:600;color:var(--t3);letter-spacing:.06em;text-transform:uppercase;margin-bottom:7px}
+.cat-opt{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:10px 12px;border-radius:var(--rs);cursor:pointer;
+  font-size:13px;font-weight:500;
+  border:1px solid var(--b);margin-bottom:5px;transition:all .15s;
+}
+.cat-opt:hover{background:var(--bg)}
+.cat-opt.sel{border-color:var(--G);background:var(--Gl)}
+.cat-check{width:16px;height:16px;border-radius:50%;border:1.5px solid var(--bm);flex-shrink:0}
+.cat-opt.sel .cat-check{background:var(--G);border-color:var(--G)}
+.freq-badge{font-size:9px;font-weight:600;padding:2px 6px;border-radius:10px}
+.fmo{background:var(--Gb);color:var(--G)}.fqt{background:var(--Bb);color:var(--B)}.fan{background:var(--Ab);color:var(--A)}.fah{background:var(--bg);color:var(--t3);border:1px solid var(--bm)}
+
+/* ── DASHBOARD ── */
+#sd{background:var(--bg)}
+.dh{background:var(--s);border-bottom:1px solid var(--b);position:sticky;top:0;z-index:10}
+.dtr{display:flex;align-items:center;justify-content:space-between;padding:12px 17px 10px}
+.du{display:flex;align-items:center;gap:8px}
+.dav{width:32px;height:32px;border-radius:50%;background:var(--Gb);color:var(--G);font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center}
+.dnm{font-size:13px;font-weight:600}.dpd{font-size:10px;color:var(--t2)}
+.sppill{display:flex;align-items:center;gap:4px;background:var(--Gb);color:var(--G);font-size:11px;font-weight:700;padding:4px 9px;border-radius:20px}
+.nb{background:none;border:1px solid var(--bm);border-radius:6px;padding:4px 9px;font-family:'DM Sans',sans-serif;font-size:11px;font-weight:500;color:var(--t2);cursor:pointer;display:flex;align-items:center;gap:3px}
+.nb:hover{background:var(--bg)}
+.mts{display:flex;overflow-x:auto;scrollbar-width:none}
+.mts::-webkit-scrollbar{display:none}
+.mt{flex:0 0 auto;padding:8px 11px 7px;cursor:pointer;border-bottom:2px solid transparent;text-align:center;transition:all .15s}
+.mt.on{border-bottom-color:var(--G)}
+.mv{font-size:11px;font-weight:600;white-space:nowrap}
+.mlbl{font-size:9px;color:var(--t3);margin-top:1px;white-space:nowrap}
+.mt.on .mv,.mt.on .mlbl{color:var(--G)}
+.sb{background:var(--bg);border-bottom:1px solid var(--b);padding:6px 13px;display:flex;gap:5px;overflow-x:auto;scrollbar-width:none}
+.sb::-webkit-scrollbar{display:none}
+.stab{flex:0 0 auto;padding:4px 10px;border-radius:20px;font-size:11px;font-weight:500;cursor:pointer;color:var(--t2);border:1px solid transparent;transition:all .15s}
+.stab.on{background:var(--Gb);color:var(--G);border-color:rgba(26,122,74,.2)}
+.db{padding:16px 17px 32px;max-width:540px;margin:0 auto;width:100%}
+.sr2{display:flex;gap:6px;margin-bottom:13px}
+.sc2{flex:1;min-width:0;background:var(--bg);border:1px solid var(--b);border-radius:var(--rs);padding:8px 10px}
+.sl{font-size:9px;font-weight:600;color:var(--t3);text-transform:uppercase;letter-spacing:.05em}
+.sv{font-size:15px;font-weight:600;margin-top:2px}
+.secl{font-size:10px;font-weight:600;color:var(--t3);letter-spacing:.07em;text-transform:uppercase;margin:14px 0 6px}
+.secl:first-child{margin-top:0}
+.ig{background:var(--s);border:1px solid var(--b);border-radius:var(--r);padding:3px 13px;margin-bottom:6px}
+.ir{display:flex;align-items:flex-start;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--b);gap:7px}
+.ir:last-child{border-bottom:none}
+.il{flex:1;min-width:0}
+.inm{font-size:13px;color:var(--t)}
+.is{font-size:11px;color:var(--t3);margin-top:2px}
+.ira{text-align:right;flex-shrink:0}
+.ia{font-size:13px;font-weight:600}
+.ip{font-size:10px;color:var(--t3);margin-top:2px}
+.cG{color:var(--G)}.cR{color:var(--R)}.cB{color:var(--B)}.cA{color:var(--A)}.cD{color:var(--t2);font-weight:400}
+.ftg{display:inline-block;font-size:9px;font-weight:600;padding:2px 6px;border-radius:10px;letter-spacing:.02em;vertical-align:middle;margin-left:5px}
+.fmo{background:var(--Gb);color:var(--G)}.fqt{background:var(--Bb);color:var(--B)}.fan{background:var(--Ab);color:var(--A)}.fah{background:var(--bg);color:var(--t3);border:1px solid var(--bm)}
+.ins{border-radius:var(--r);padding:11px 13px;font-size:12px;line-height:1.7;margin-top:11px}
+.iG{background:var(--Gl);border:1px solid rgba(26,122,74,.2);color:#144d31}
+.iR{background:var(--Rb);border:1px solid rgba(192,57,43,.2);color:#7a1c13}
+.iA{background:var(--Ab);border:1px solid rgba(146,96,10,.2);color:#5c3c06}
+.iB{background:var(--Bb);border:1px solid rgba(26,78,138,.15);color:#0f2d56}
+.flg{background:var(--Rb);border:1px solid rgba(192,57,43,.25);border-radius:var(--rs);padding:9px 11px;font-size:12px;color:#7a1c13;line-height:1.5;margin-bottom:6px}
+.flt{font-weight:600;margin-bottom:2px}
+.plt{width:100%;border-collapse:collapse;font-size:11px}
+.plt th{text-align:right;font-weight:600;color:var(--t3);font-size:10px;text-transform:uppercase;letter-spacing:.04em;padding:0 4px 7px;border-bottom:1.5px solid var(--bm)}
+.plt th:first-child{text-align:left}
+.plt td{text-align:right;padding:7px 4px;border-bottom:1px solid var(--b);color:var(--t)}
+.plt td:first-child{text-align:left;color:var(--t2)}
+.plt tr.tot td{font-weight:700;border-top:2px solid var(--bm);border-bottom:none;padding-top:9px;font-size:12px}
+.pp{color:var(--G);font-weight:600}.pn{color:var(--R)}.pd2{color:var(--t2)}
+.af{background:var(--bg);border:1px solid var(--bm);border-radius:var(--rs);padding:10px 12px;font-family:'DM Mono',monospace;font-size:11px;color:var(--t2);line-height:1.9;margin-bottom:12px}
+.af span{color:var(--t);font-weight:500}
+.scr{display:flex;justify-content:space-between;align-items:center;padding:9px 12px;border-radius:var(--rs);margin-bottom:5px;font-size:13px}
+.scr.main{background:var(--Gl);border:1px solid rgba(26,122,74,.2)}
+.scr.alt{background:var(--bg);border:1px solid var(--b)}
+</style>
+</head>
+<body>
+
+<!-- ── UPLOAD ── -->
+<div id="su" class="screen on">
+  <div class="topbar">
+    <div class="tl">
+      <div class="tlm"><svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+      <span class="tln">Wys</span>
+    </div>
+    <div class="badge">Free · Claude AI</div>
+  </div>
+  <div class="ubody">
+    <div class="uh">
+      <h2>Upload your statements</h2>
+      <p>PDF, image or CSV — any bank, any country. Wys reads every transaction, categorises it and shows your complete financial picture.</p>
+    </div>
+    <input type="file" id="fi" multiple accept=".pdf,image/*,.csv,.txt" style="display:none" onchange="addFiles(this.files)">
+    <div class="dz" id="dz" onclick="document.getElementById('fi').click()"
+      ondragover="event.preventDefault();this.classList.add('drag')"
+      ondragleave="this.classList.remove('drag')"
+      ondrop="event.preventDefault();this.classList.remove('drag');addFiles(event.dataTransfer.files)">
+      <div style="display:flex;justify-content:center;margin-bottom:10px"><svg width="34" height="34" viewBox="0 0 24 24" fill="none"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" stroke="#1a7a4a" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/><polyline points="17 8 12 3 7 8" stroke="#1a7a4a" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/><line x1="12" y1="3" x2="12" y2="15" stroke="#1a7a4a" stroke-width="1.6" stroke-linecap="round"/></svg></div>
+      <h3>Drop files or tap to browse</h3>
+      <p>Upload all statements at once</p>
+      <div class="pills"><span class="pill">PDF</span><span class="pill">JPG/PNG</span><span class="pill">CSV</span></div>
+    </div>
+    <div id="flist" class="flist"></div>
+    <button class="btn btn-p" id="abtn" onclick="startAnalysis()" style="display:none">Analyse <span id="fcnt"></span></button>
+    
+  </div>
+</div>
+
+<!-- ── PROCESSING ── -->
+<div id="sp" class="screen">
+  <div class="pc">
+    <div class="spin"></div>
+    <div class="ph" id="ph">Reading statements...</div>
+    <div class="ps" id="ps">Takes 20–60 seconds</div>
+    <div class="prog" id="prog"></div>
+    <div class="perr" id="perr">
+      <strong>Something went wrong</strong><br>
+      <span id="perr-msg"></span><br>
+      <button class="retry" onclick="show('su')">← Go back</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── REVIEW ── -->
+<div id="sr" class="screen">
+  <div class="rev-head">
+    <div class="rev-title">Review transactions</div>
+    <div class="rev-sub" id="rev-sub">Tap a category to reassign · trash to remove</div>
+  </div>
+  <div class="rev-filters" id="rev-filters">
+    <div class="rfilt on" onclick="filterReview('all',this)">All</div>
+    <div class="rfilt" onclick="filterReview('income',this)">Income</div>
+    <div class="rfilt" onclick="filterReview('expenses',this)">Expenses</div>
+    <div class="rfilt" onclick="filterReview('investments',this)">Investments</div>
+    <div class="rfilt" onclick="filterReview('loans',this)">Loans</div>
+    <div class="rfilt" onclick="filterReview('unknown',this)">Unmatched</div>
+  </div>
+  <div class="rev-body" id="rev-body"></div>
+  <div class="rev-actions">
+    <div class="rev-count" id="rev-count">0 transactions</div>
+    <button class="rev-go-btn" onclick="buildDashboard()">Build dashboard →</button>
+  </div>
+</div>
+
+<!-- ── BOTTOM SHEET (category picker) ── -->
+<div class="overlay" id="overlay" onclick="closeSheet(event)">
+  <div class="sheet" id="sheet">
+    <div class="sheet-handle"></div>
+    <div class="sheet-title">Move to...</div>
+    <div id="sheet-opts"></div>
+  </div>
+</div>
+
+<!-- ── DASHBOARD ── -->
+<div id="sd" class="screen">
+  <div class="dh">
+    <div class="dtr">
+      <div class="du">
+        <div class="dav" id="dav">—</div>
+        <div><div class="dnm" id="dnm">—</div><div class="dpd" id="dpd">—</div></div>
+      </div>
+      <div style="display:flex;align-items:center;gap:6px">
+        <div class="sppill"><svg width="9" height="9" viewBox="0 0 24 24" fill="none"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/></svg><span id="dsurp">—</span></div>
+        <button class="nb" onclick="show('sr')"><svg width="10" height="10" viewBox="0 0 24 24" fill="none"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>Edit</button>
+        <button class="nb" onclick="show('su')"><svg width="10" height="10" viewBox="0 0 24 24" fill="none"><path d="M3 12a9 9 0 109-9M3 3v6h6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>New</button>
+      </div>
+    </div>
+    <div class="mts">
+      <div class="mt on" onclick="sM('income',this)"><div class="mv" id="mv-i">—</div><div class="mlbl">Income</div></div>
+      <div class="mt" onclick="sM('expenses',this)"><div class="mv" id="mv-e">—</div><div class="mlbl">Expenses</div></div>
+      <div class="mt" onclick="sM('invest',this)"><div class="mv" id="mv-v">—</div><div class="mlbl">Investments</div></div>
+      <div class="mt" onclick="sM('loans',this)"><div class="mv" id="mv-l">—</div><div class="mlbl">Loans</div></div>
+      <div class="mt" onclick="sM('pl',this)"><div class="mv">P&amp;L</div><div class="mlbl">Summary</div></div>
+    </div>
+  </div>
+  <div id="sb-income" class="sb"><div class="stab on" onclick="sS('income','direct',this)">Direct</div><div class="stab" onclick="sS('income','indirect',this)">Indirect</div></div>
+  <div id="sb-expenses" class="sb" style="display:none"><div class="stab on" onclick="sS('expenses','food',this)">Food</div><div class="stab" onclick="sS('expenses','shelter',this)">Shelter</div><div class="stab" onclick="sS('expenses','fees',this)">Fees</div><div class="stab" onclick="sS('expenses','transport',this)">Transport</div><div class="stab" onclick="sS('expenses','misc',this)">Misc</div></div>
+  <div id="sb-invest" class="sb" style="display:none"><div class="stab on" onclick="sS('invest','all',this)">All plans</div></div>
+  <div id="sb-loans" class="sb" style="display:none"><div class="stab on" onclick="sS('loans','main',this)">Both loans</div></div>
+  <div id="sb-pl" class="sb" style="display:none"><div class="stab on" onclick="sS('pl','monthly',this)">Monthly</div><div class="stab" onclick="sS('pl','avg',this)">Averages</div></div>
+  <div class="db" id="db"></div>
+</div>
+
+<script>
+// ══ CONFIG ══
+const WORKER_URL = '/api/analyze';
+
+// ══ STATE ══
+let files=[], allTxns=[], plData=null;
+let cM='income', cS={income:'direct',expenses:'food',invest:'all',loans:'main',pl:'monthly'};
+let activeFilter='all', editingIdx=null;
+
+// ══ CATEGORY CONFIG ══
+const CATS = {
+  income:      { label:'Income',      color:'cat-income',      subs:{ direct:'Direct income', indirect:'Indirect / other' } },
+  expenses:    { label:'Expenses',    color:'cat-expenses',    subs:{ food:'Food & dining', shelter:'Shelter / rent', fees:'Fees & education', transport:'Transport', misc:'Miscellaneous' } },
+  investments: { label:'Investments', color:'cat-investments', subs:{ all:'Investments' } },
+  loans:       { label:'Loans',       color:'cat-loans',       subs:{ main:'Loan repayments' } },
+};
+
+// ══ BUILT-IN DEMO DATA ══
+// (same DEMO object as before — truncated here for brevity; runtime uses pre-categorised transactions)
+const DEMO_TXNS = [
+  {date:'2025-10-15',merchant:'Salary Payment',amount:30000,type:'credit',cat:'income',sub:'direct',type:'salary',freq:'monthly'},
+  {date:'2025-10-18',merchant:'ADNOC Seih Sedirah',amount:160,type:'debit',cat:'expenses',sub:'transport',type:'fuel',freq:'monthly'},
+  {date:'2025-10-19',merchant:'Talabat.com',amount:85,type:'debit',cat:'expenses',sub:'food',type:'delivery',freq:'monthly'},
+  {date:'2025-10-20',merchant:'Selfdrive AE Dubai',amount:1415.30,type:'debit',cat:'expenses',sub:'transport',type:'car_rental',freq:'monthly'},
+  {date:'2025-10-22',merchant:'GEMS United Indian School',amount:1251,type:'debit',cat:'expenses',sub:'fees',type:'school_tuition',freq:'monthly'},
+  {date:'2025-10-25',merchant:'Lulu Hypermarket',amount:180,type:'debit',cat:'expenses',sub:'food',type:'supermarket',freq:'monthly'},
+  {date:'2025-10-28',merchant:'Installment Recovery 559R',amount:4332.93,type:'debit',cat:'loans',sub:'main',type:'personal_loan',freq:'monthly'},
+  {date:'2025-11-03',merchant:'Installment ref 1639',amount:1639,type:'debit',cat:'loans',sub:'main',type:'car_loan',freq:'monthly'},
+  {date:'2025-11-10',merchant:'Zurich Intl Life Ltd',amount:559.89,type:'debit',cat:'investments',sub:'all',type:'life_insurance',freq:'monthly'},
+  {date:'2025-11-12',merchant:'Glomo Dubai AE',amount:1101.75,type:'debit',cat:'investments',sub:'all',type:'insurance_usd',freq:'monthly',note:'Policy Bazaar USD $300/mo'},
+  {date:'2025-11-15',merchant:'Salary Payment',amount:30000,type:'credit',cat:'income',sub:'direct',type:'salary',freq:'monthly'},
+  {date:'2025-11-20',merchant:'Waitrose Supermarket',amount:145,type:'debit',cat:'expenses',sub:'food',type:'supermarket',freq:'monthly'},
+  {date:'2025-11-26',merchant:'Rita Towers rent',amount:9250,type:'debit',cat:'expenses',sub:'shelter',type:'rent',freq:'quarterly'},
+  {date:'2025-11-30',merchant:'Abu Dhabi Police',amount:206,type:'debit',cat:'expenses',sub:'misc',type:'traffic_fine',freq:'adhoc',avoidable:true,flag:'Traffic fine — avoidable'},
+  {date:'2025-12-10',merchant:'Zurich Intl Life Ltd',amount:559.89,type:'debit',cat:'investments',sub:'all',type:'life_insurance',freq:'monthly'},
+  {date:'2025-12-15',merchant:'Salary Payment',amount:30750,type:'credit',cat:'income',sub:'direct',type:'salary',freq:'monthly'},
+  {date:'2025-12-25',merchant:'Policy Bazaar Gurgaon',amount:1904.13,type:'debit',cat:'investments',sub:'all',type:'insurance_inr',freq:'quarterly'},
+  {date:'2026-01-05',merchant:'GEMS United Indian School',amount:2096.25,type:'debit',cat:'expenses',sub:'fees',type:'school_tuition',freq:'monthly'},
+  {date:'2026-01-10',merchant:'Zurich Intl Life Ltd',amount:559.89,type:'debit',cat:'investments',sub:'all',type:'life_insurance',freq:'monthly'},
+  {date:'2026-01-12',merchant:'Glomo Dubai AE',amount:1101.75,type:'debit',cat:'investments',sub:'all',type:'insurance_usd',freq:'monthly',note:'Policy Bazaar USD $300/mo'},
+  {date:'2026-01-15',merchant:'Salary Payment',amount:30250,type:'credit',cat:'income',sub:'direct',type:'salary',freq:'monthly'},
+  {date:'2026-01-16',merchant:'Abu Dhabi Police',amount:981,type:'debit',cat:'expenses',sub:'misc',type:'traffic_fine',freq:'adhoc',avoidable:true,flag:'Traffic fine — avoidable'},
+  {date:'2026-02-10',merchant:'Zurich Intl Life Ltd',amount:559.89,type:'debit',cat:'investments',sub:'all',type:'life_insurance',freq:'monthly'},
+  {date:'2026-02-15',merchant:'Salary Payment',amount:31580,type:'credit',cat:'income',sub:'direct',type:'salary',freq:'monthly'},
+  {date:'2026-02-20',merchant:'Talabat PostPaid',amount:620,type:'debit',cat:'expenses',sub:'food',type:'delivery',freq:'monthly'},
+  {date:'2026-03-10',merchant:'Zurich Intl Life Ltd',amount:559.89,type:'debit',cat:'investments',sub:'all',type:'life_insurance',freq:'monthly'},
+  {date:'2026-03-15',merchant:'Salary Payment',amount:33575,type:'credit',cat:'income',sub:'direct',type:'salary',freq:'monthly'},
+  {date:'2026-03-25',merchant:'Policy Bazaar Gurgaon',amount:1816.80,type:'debit',cat:'investments',sub:'all',type:'insurance_inr',freq:'quarterly'},
+  {date:'2026-04-01',merchant:'Rita Towers rent',amount:9250,type:'debit',cat:'expenses',sub:'shelter',type:'rent',freq:'quarterly'},
+  {date:'2026-04-07',merchant:'LIVAINS BSC',amount:1785,type:'debit',cat:'investments',sub:'all',type:'car_insurance',freq:'annual'},
+  {date:'2026-04-08',merchant:'Abu Dhabi Police',amount:202,type:'debit',cat:'expenses',sub:'misc',type:'traffic_fine',freq:'adhoc',avoidable:true,flag:'Traffic fine — avoidable'},
+];
+
+// ══ FILES ══
+function addFiles(fl){Array.from(fl).forEach(f=>{if(!files.find(x=>x.name===f.name))files.push(f);});renderFiles();}
+function removeFile(i){files.splice(i,1);renderFiles();}
+function renderFiles(){
+  const el=document.getElementById('flist');
+  el.innerHTML=files.map((f,i)=>{
+    const e=f.name.split('.').pop().toLowerCase();
+    const cls=['jpg','jpeg','png'].includes(e)?'img':e==='pdf'?'pdf':'csv';
+    const bg={pdf:'#fde8e8',img:'#e8f0fd',csv:'#e8fdf0'}[cls];
+    const c={pdf:'#c0392b',img:'#1a4e8a',csv:'#1a7a4a'}[cls];
+    const sz=f.size>1048576?(f.size/1048576).toFixed(1)+' MB':Math.round(f.size/1024)+' KB';
+    return `<div class="frow"><div class="fi" style="background:${bg}"><svg width="13" height="13" viewBox="0 0 24 24" fill="none"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" stroke="${c}" stroke-width="1.6"/><polyline points="14 2 14 8 20 8" stroke="${c}" stroke-width="1.6"/></svg></div><span class="fn">${f.name}</span><span class="fz">${sz}</span><button class="frb" onclick="removeFile(${i})">×</button></div>`;
+  }).join('');
+  const ab=document.getElementById('abtn'), fc=document.getElementById('fcnt');
+  if(files.length>0){ab.style.display='block';fc.textContent=`${files.length} file${files.length>1?'s':''}`;} 
+  else{ab.style.display='none';}
+}
+
+function loadDemo(){
+  allTxns=DEMO_TXNS.map((t,i)=>({...t,_id:i,_deleted:false}));
+  showReview();
+}
+
+// ══ ANALYSIS ══
+async function startAnalysis(){
+  if(!files.length)return;
+  if(WORKER_URL==='PASTE_YOUR_WORKER_URL_HERE'){
+    alert('⚠️ Worker URL not configured.\n\nLoading demo data instead.');
+    loadDemo(); return;
+  }
+  show('sp');
+  const estSecs=files.length*12;
+  document.getElementById('ps').textContent=`Takes ~${estSecs}–${estSecs+30} seconds for ${files.length} file${files.length>1?'s':''}`;
+  const steps=files.map(f=>`Reading: ${f.name.slice(0,30)}`).concat(['Applying categorisation rules','Building review...']);
+  buildProg(steps); let idx=0;
+  try{
+    let all=[], skipped=[];
+    for(let i=0;i<files.length;i++){
+      setAct(i); idx=i;
+      document.getElementById('ph').textContent=`Reading ${i+1} of ${files.length}...`;
+      if(i>0) await wait(1000);
+      const mime=files[i].type||getMime(files[i].name);
+      let text='';
+      try{
+        if(mime==='application/pdf'){
+          text=await extractPdfText(files[i]);
+        } else {
+          const b64=await toB64(files[i]);
+          text=atob(b64).slice(0,40000);
+        }
+      }catch(e){
+        skipped.push({name:files[i].name,reason:'error'});
+        document.getElementById('pd'+i)?.setAttribute('class','pdot wait');
+        document.getElementById('pt'+i).innerHTML=`⚠ Could not read: ${files[i].name.slice(0,25)}`;
+        document.getElementById('pt'+i)?.setAttribute('class','ptxt wait');
+        continue;
+      }
+      let success=false;
+      for(let attempt=0;attempt<2;attempt++){
+        try{
+          const res=await fetch(WORKER_URL,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'extract',text,filename:files[i].name})});
+          if(res.status===429||res.status===529){await wait(8000);continue;}
+          if(!res.ok) throw new Error(`Worker error ${res.status}`);
+          const d=await res.json();
+          if(d.error) throw new Error(d.error);
+          all.push(...(d.transactions||[]));
+          success=true; break;
+        }catch(e){
+          if(attempt===0){await wait(5000);continue;}
+          const isTimeout=e.message.includes('524')||e.message.includes('timeout')||e.message.toLowerCase().includes('network');
+          skipped.push({name:files[i].name,reason:isTimeout?'timeout':'error'});
+          document.getElementById('pd'+i)?.setAttribute('class','pdot wait');
+          document.getElementById('pt'+i).innerHTML=`⚠ ${isTimeout?'Too large — needs splitting':'Failed'}: ${files[i].name.slice(0,25)}`;
+          document.getElementById('pt'+i)?.setAttribute('class','ptxt wait');
+        }
+      }
+      if(success) setDone(i);
+    }
+    if(skipped.length){
+      const timeouts=skipped.filter(s=>s.reason==='timeout');
+      const errors=skipped.filter(s=>s.reason==='error');
+      const w=document.createElement('div');
+      w.style.cssText='background:#fef9ec;border:1px solid rgba(146,96,10,.3);border-radius:8px;padding:10px 12px;font-size:11px;color:#5c3c06;margin-top:10px;text-align:left;line-height:1.8';
+      let msg='';
+      if(timeouts.length){
+        msg+=`<strong>⚠ ${timeouts.length} file${timeouts.length>1?'s are':' is'} too large to process in one go:</strong><br>`;
+        msg+=timeouts.map(s=>`· ${s.name}`).join('<br>');
+        msg+=`<br><br>📄 <strong>Fix:</strong> Split into monthly PDFs using <a href="https://smallpdf.com/split-pdf" target="_blank" style="color:#92600a;font-weight:600">smallpdf.com/split-pdf</a> (free), then upload the monthly files individually.`;
+      }
+      if(errors.length){
+        msg+=`${timeouts.length?'<br><br>':''}<strong>❌ ${errors.length} file${errors.length>1?'s':''}  failed:</strong><br>`;
+        msg+=errors.map(s=>`· ${s.name}`).join('<br>');
+      }
+      w.innerHTML=msg;
+      document.querySelector('.pc').appendChild(w);
+      await wait(4000);
+    }
+    if(!all.length){
+      throw new Error('No transactions could be extracted. Please check your files and try again.');
+    }
+    setAct(idx+1);
+    document.getElementById('ph').textContent='Rules applied — review ready';
+    await wait(400); setDone(idx+1); setAct(idx+2);
+    allTxns=all.map((t,i)=>({...t,_id:i,_deleted:false}));
+    await wait(300); setDone(idx+2);
+    showReview();
+  }catch(e){
+    document.getElementById('perr').style.display='block';
+    document.getElementById('perr-msg').textContent=e.message;
+    document.getElementById('ph').textContent='Failed';
+  }
+}
+
+// ══ REVIEW ══
+function showReview(){
+  show('sr');
+  updateRevCount();
+  renderReview();
+}
+
+function filterReview(f,el){
+  activeFilter=f;
+  document.querySelectorAll('.rfilt').forEach(x=>x.classList.remove('on'));
+  el.classList.add('on');
+  renderReview();
+}
+
+function renderReview(){
+  const body=document.getElementById('rev-body');
+  const visible=allTxns.filter(t=>{
+    if(t._deleted) return false;
+    if(activeFilter==='all') return true;
+    if(activeFilter==='unknown') return t.cat==='expenses'&&t.type==='unknown';
+    return t.cat===activeFilter;
+  });
+  if(!visible.length){body.innerHTML=`<div class="rev-empty">No transactions in this filter</div>`;return;}
+  body.innerHTML=visible.map(t=>{
+    const catInfo=CATS[t.cat];
+    const catLabel=catInfo?`${catInfo.label}${t.sub&&t.sub!=='all'?' · '+catInfo.subs[t.sub]||t.sub:''}`:t.cat||'Unknown';
+    const catCls=catInfo?catInfo.color:'cat-unknown';
+    const ftCls={'monthly':'fmo','quarterly':'fqt','annual':'fan'}[t.freq]||'fah';
+    const dateStr=(t.date||'').slice(5).replace('-','/');
+    const amtColor=t.type==='credit'?'cr':'dr';
+    const prefix=t.type==='credit'?'+':'-';
+    const avoidBadge=t.avoidable?`<span style="font-size:9px;background:#fde8e8;color:#c0392b;border-radius:4px;padding:1px 5px;margin-left:4px">avoidable</span>`:'';
+    return `<div class="txn-row" id="tr-${t._id}">
+      <span class="txn-date">${dateStr}</span>
+      <div style="flex:1;min-width:0">
+        <div class="txn-merchant">${t.merchant||'Unknown'}</div>
+        ${t.note?`<div style="font-size:10px;color:var(--A);margin-top:1px">⚠ ${t.note}</div>`:''}
+      </div>
+      <span class="txn-amt ${amtColor}">${prefix}${fmt(t.amount)}</span>
+      <span class="txn-cat ${catCls}" onclick="openSheet(${t._id})">${catLabel}${avoidBadge}</span>
+      <span class="freq-badge ${ftCls}">${(t.freq||'adhoc').toUpperCase().slice(0,2)}</span>
+      <button class="txn-del" onclick="deleteTxn(${t._id})" title="Remove">×</button>
+    </div>`;
+  }).join('');
+  updateRevCount();
+}
+
+function deleteTxn(id){
+  const t=allTxns.find(x=>x._id===id);
+  if(t) t._deleted=true;
+  const el=document.getElementById('tr-'+id);
+  if(el) el.remove();
+  updateRevCount();
+}
+
+function updateRevCount(){
+  const active=allTxns.filter(t=>!t._deleted);
+  document.getElementById('rev-count').textContent=`${active.length} transaction${active.length!==1?'s':''}`;
+  document.getElementById('rev-sub').textContent=`${active.length} transactions · tap category to reassign · × to remove`;
+}
+
+// ══ SHEET ══
+function openSheet(id){
+  editingIdx=id;
+  const t=allTxns.find(x=>x._id===id);
+  if(!t) return;
+  const cur=`${t.cat}:${t.sub}`;
+  let html='';
+  for(const [cat,info] of Object.entries(CATS)){
+    html+=`<div class="cat-group"><div class="cat-group-label">${info.label}</div>`;
+    for(const [sub,label] of Object.entries(info.subs)){
+      const val=`${cat}:${sub}`, sel=val===cur?'sel':'';
+      html+=`<div class="cat-opt ${sel}" onclick="assignCat('${cat}','${sub}')">
+        <span>${label}</span>
+        <div class="cat-check"></div>
+      </div>`;
+    }
+    html+='</div>';
+  }
+  document.getElementById('sheet-opts').innerHTML=html;
+  document.getElementById('overlay').classList.add('on');
+}
+
+function assignCat(cat,sub){
+  const t=allTxns.find(x=>x._id===editingIdx);
+  if(t){t.cat=cat;t.sub=sub;}
+  closeSheet();
+  renderReview();
+}
+
+function closeSheet(e){
+  if(e&&e.target!==document.getElementById('overlay')) return;
+  document.getElementById('overlay').classList.remove('on');
+  editingIdx=null;
+}
+
+// ══ BUILD DASHBOARD ══
+async function buildDashboard(){
+  const active=allTxns.filter(t=>!t._deleted);
+  if(!active.length) return;
+  // P&L computation is pure maths — no AI needed
+  plData=computePL(active);
+  show('sd');
+  // Update header
+  const incTot=plData.totals.income, expTot=plData.totals.expenses;
+  const invTot=plData.totals.invest, loanTot=plData.totals.loans;
+  document.getElementById('dav').textContent='BA';
+  document.getElementById('dnm').textContent='Basil Abraham';
+  document.getElementById('dpd').textContent=`${plData.pl_months.length} months · ${active.length} transactions`;
+  document.getElementById('dsurp').textContent=`AED ${fmt(plData.surplus_avg)}/mo`;
+  document.getElementById('mv-i').textContent='AED '+fK(incTot);
+  document.getElementById('mv-e').textContent='AED '+fK(expTot);
+  document.getElementById('mv-v').textContent='AED '+fK(invTot);
+  document.getElementById('mv-l').textContent='AED '+fK(loanTot);
+  document.querySelectorAll('[id^=sb-]').forEach(sb=>sb.style.display='none');
+  document.getElementById('sb-income').style.display='flex';
+  renderDash();
+}
+
+function computePL(txns){
+  const monthMap={};
+  for(const t of txns){
+    const m=(t.date||'').slice(0,7)||'unknown';
+    if(!monthMap[m]) monthMap[m]={inc:0,exp:0,inv:0,loans:0};
+    const amt=Number(t.amount)||0;
+    if(t.cat==='income') monthMap[m].inc+=amt;
+    else if(t.cat==='expenses') monthMap[m].exp+=amt;
+    else if(t.cat==='investments') monthMap[m].inv+=amt;
+    else if(t.cat==='loans') monthMap[m].loans+=amt;
+  }
+  const MO={'01':'Jan','02':'Feb','03':'Mar','04':'Apr','05':'May','06':'Jun','07':'Jul','08':'Aug','09':'Sep','10':'Oct','11':'Nov','12':'Dec'};
+  const pl_months=Object.entries(monthMap).sort(([a],[b])=>a.localeCompare(b)).map(([ym,v])=>{
+    const [yr,mo]=ym.split('-');
+    return{m:`${MO[mo]||mo} ${(yr||'').slice(2)}`,inc:Math.round(v.inc),exp:Math.round(v.exp),inv:Math.round(v.inv),loans:Math.round(v.loans)};
+  });
+  const n=pl_months.length||1;
+  const totals=pl_months.reduce((a,r)=>({income:a.income+r.inc,expenses:a.expenses+r.exp,invest:a.invest+r.inv,loans:a.loans+r.loans}),{income:0,expenses:0,invest:0,loans:0});
+  return{pl_months,totals,surplus_avg:Math.round((totals.income-totals.expenses-totals.invest-totals.loans)/n),months:n};
+}
+
+// ══ DASHBOARD RENDER ══
+function sM(id,el){
+  cM=id;
+  document.querySelectorAll('.mt').forEach(t=>t.classList.remove('on'));el.classList.add('on');
+  ['income','expenses','invest','loans','pl'].forEach(k=>{const sb=document.getElementById('sb-'+k);if(sb)sb.style.display=k===id?'flex':'none';});
+  renderDash();
+}
+function sS(main,sub,el){cS[main]=sub;document.querySelectorAll(`#sb-${main} .stab`).forEach(t=>t.classList.remove('on'));el.classList.add('on');renderDash();}
+
+function renderDash(){
+  const d=plData; if(!d||!allTxns.length) return;
+  const txns=allTxns.filter(t=>!t._deleted);
+  const el=document.getElementById('db'), m=cM, s=cS[m]; let h='';
+
+  function catTxns(cat,sub){return txns.filter(t=>t.cat===cat&&(!sub||sub==='all'||t.sub===sub));}
+  function sumAmt(arr){return arr.reduce((a,t)=>a+(Number(t.amount)||0),0);}
+  function groupMerchant(arr){
+    const g={};
+    for(const t of arr){const k=t.merchant||'Unknown';if(!g[k])g[k]={amt:0,freq:t.freq,note:t.note,avoidable:t.avoidable};g[k].amt+=Number(t.amount)||0;}
+    return Object.entries(g).sort(([,a],[,b])=>b.amt-a.amt).map(([n,v])=>({n,s:'',f:v.freq,a:v.amt,avoidable:v.avoidable,note:v.note}));
+  }
+
+  if(m==='income'){
+    const direct=catTxns('income','direct'), indirect=catTxns('income','indirect');
+    if(s==='direct'){
+      h+=stats2([{l:'Total',v:'AED '+fmt(sumAmt(direct)),c:'G'},{l:'Monthly avg',v:'AED '+fmt(Math.round(sumAmt(direct)/d.months))},{l:'Months',v:''+d.months}]);
+      h+=secl('By source');h+=`<div class="ig">`;
+      groupMerchant(direct).forEach(it=>{h+=ir(it.n,it.note||'',ftg(it.f),'AED '+fmt(it.a),'G','');});
+      h+=`</div>`;
+    }else{
+      h+=stats2([{l:'Total',v:'AED '+fmt(sumAmt(indirect)),c:'G'},{l:'Transactions',v:''+indirect.length}]);
+      h+=secl('Indirect income');h+=`<div class="ig">`;
+      groupMerchant(indirect).forEach(it=>{h+=ir(it.n,'',ftg(it.f),'AED '+fmt(it.a),'G','');});
+      h+=`</div>`;
+    }
+  }
+  else if(m==='expenses'){
+    const sub=s;
+    const txnsInSub=catTxns('expenses',sub);
+    const tot=sumAmt(txnsInSub);
+    const avoidable=txnsInSub.filter(t=>t.avoidable);
+    h+=stats2([{l:'Total (6 mo)',v:'AED '+fmt(tot),c:'R'},{l:'Monthly avg',v:'AED '+fmt(Math.round(tot/d.months))},{l:'Transactions',v:''+txnsInSub.length}]);
+    if(avoidable.length){
+      h+=secl('Avoidable charges');
+      avoidable.forEach(t=>{h+=`<div class="flg"><div class="flt">${t.merchant} — AED ${fmt(t.amount)}</div>${t.flag||'Avoidable charge'}</div>`;});
+    }
+    h+=secl(`${CATS.expenses.subs[sub]||sub} breakdown`);
+    h+=`<div class="ig">`;
+    groupMerchant(txnsInSub.filter(t=>!t.avoidable)).forEach(it=>{h+=ir(it.n,it.note||'',ftg(it.f),'AED '+fmt(it.a),'','');});
+    if(!txnsInSub.filter(t=>!t.avoidable).length) h+=`<div style="padding:14px 0;text-align:center;font-size:12px;color:var(--t3)">No transactions</div>`;
+    h+=`</div>`;
+  }
+  else if(m==='invest'){
+    const inv=catTxns('investments');
+    const tot=sumAmt(inv);
+    h+=stats2([{l:'Total (6 mo)',v:'AED '+fmt(tot),c:'B'},{l:'Monthly avg',v:'AED '+fmt(Math.round(tot/d.months))},{l:'Plans',v:''+new Set(inv.map(t=>t.merchant)).size}]);
+    h+=secl('Investment plans');h+=`<div class="ig">`;
+    groupMerchant(inv).forEach(it=>{h+=ir(it.n,it.note||'',ftg(it.f),'AED '+fmt(it.a),'B','');});
+    h+=`</div>`;
+  }
+  else if(m==='loans'){
+    const loans=catTxns('loans');
+    const tot=sumAmt(loans);
+    h+=stats2([{l:'Total (6 mo)',v:'AED '+fmt(tot),c:'B'},{l:'Monthly',v:'AED '+fmt(Math.round(tot/d.months))},{l:'% salary',v:Math.round(tot/d.months/31026*100)+'%'}]);
+    h+=secl('Loan repayments');h+=`<div class="ig">`;
+    groupMerchant(loans).forEach(it=>{h+=ir(it.n,'',ftg('monthly'),'AED '+fmt(it.a/d.months),'B','/mo');});
+    h+=`</div>`;
+    h+=ins('G','Loan-to-income ratio within healthy range. Both loans paid on schedule with zero missed payments.');
+  }
+  else if(m==='pl'){
+    if(s==='monthly'){
+      h+=`<div class="af"><span>P&L</span> = <span>Income</span> − <span>Expenses</span> − <span>Investments</span> − <span>Loans</span></div>`;
+      h+=`<div style="overflow-x:auto"><table class="plt" style="min-width:280px"><thead><tr><th>Month</th><th>Inc.</th><th>Exp.</th><th>Inv.</th><th>Loans</th><th>P&L</th></tr></thead><tbody>`;
+      let grand=0;
+      d.pl_months.forEach(r=>{
+        const pl=r.inc-r.exp-r.inv-r.loans;grand+=pl;
+        h+=`<tr><td>${r.m}</td><td class="pd2">${fK2(r.inc)}</td><td class="pd2">${fK2(r.exp)}</td><td class="pd2">${fK2(r.inv)}</td><td class="pd2">${fK2(r.loans)}</td><td class="${pl>=0?'pp':'pn'}">${pl>=0?'+':''}${fK2(Math.abs(pl))}</td></tr>`;
+      });
+      const {income:ti,expenses:te,invest:tv,loans:tl}=d.totals;
+      h+=`<tr class="tot"><td>Total</td><td class="pp">${fK2(ti)}</td><td class="pn">${fK2(te)}</td><td class="pn">${fK2(tv)}</td><td class="pn">${fK2(tl)}</td><td class="${grand>=0?'pp':'pn'}">${grand>=0?'+':''}${fK2(Math.abs(grand))}</td></tr></tbody></table></div>`;
+      h+=ins('G',`Average monthly surplus: <strong>AED ${fmt(d.surplus_avg)}</strong>. The P&L is based on your confirmed transactions after review.`);
+    }else{
+      const n=d.months||1;
+      const {income:ti,expenses:te,invest:tv,loans:tl}=d.totals;
+      const surplus=Math.round((ti-te-tv-tl)/n);
+      h+=`<div class="af">Monthly averages over ${n} month${n!==1?'s':''}</div>`;
+      h+=`<div class="ig">`;
+      h+=ir('Income',`AED ${fmt(Math.round(ti/n))}/mo avg`,'','+AED '+fmt(Math.round(ti/n)),'G','/mo avg');
+      h+=ir('Expenses',`AED ${fmt(Math.round(te/n))}/mo avg`,'','-AED '+fmt(Math.round(te/n)),'R','');
+      h+=ir('Investments',`AED ${fmt(Math.round(tv/n))}/mo avg`,'','-AED '+fmt(Math.round(tv/n)),'B','');
+      h+=ir('Loans',`AED ${fmt(Math.round(tl/n))}/mo avg`,'','-AED '+fmt(Math.round(tl/n)),'B','');
+      h+=`</div>`;
+      h+=`<div style="margin-top:10px">
+        <div class="scr main"><span style="font-weight:600">Monthly surplus</span><span style="font-weight:700;color:var(--G)">+AED ${fmt(surplus)}</span></div>
+      </div>`;
+    }
+  }
+  el.innerHTML=h;
+}
+
+// ══ HELPERS ══
+function ftg(f){const m={monthly:'fmo',quarterly:'fqt',annual:'fan',adhoc:'fah'};const c=m[f]||'fah';return `<span class="ftg ${c}">${(f||'adhoc').toUpperCase().slice(0,2)}</span>`;}
+function ir(name,sub,fh,amt,ac,per){return `<div class="ir"><div class="il"><div class="inm">${name}${fh||''}</div>${sub?`<div class="is">${sub}</div>`:''}</div><div class="ira"><div class="ia ${ac?'c'+ac:''}">${amt}</div>${per?`<div class="ip">${per}</div>`:''}</div></div>`;}
+function stats2(arr){return `<div class="sr2">${arr.map(s=>`<div class="sc2"><div class="sl">${s.l}</div><div class="sv ${s.c?'c'+s.c:''}">${s.v}</div></div>`).join('')}</div>`;}
+function secl(t){return `<div class="secl">${t}</div>`;}
+function ins(t,x){return `<div class="ins i${t}">${x}</div>`;}
+function fmt(n){return Math.round(n||0).toLocaleString();}
+function fK(n){return n>=1000?Math.round(n/1000)+'k':Math.round(n||0)+'';}
+function fK2(n){return n>=10000?Math.round(n/1000)+'k':Math.round(n||0).toLocaleString();}
+async function extractPdfText(file){
+  pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+  const ab=await file.arrayBuffer();
+  const pdf=await pdfjsLib.getDocument({data:new Uint8Array(ab)}).promise;
+  let text='';
+  for(let p=1;p<=pdf.numPages;p++){
+    const page=await pdf.getPage(p);
+    const content=await page.getTextContent();
+    const pageText=content.items.map(i=>i.str||'').join(' ');
+    text+=pageText+'\n';
+  }
+  return text.trim().slice(0,25000);
+}
+function toB64(f){return new Promise((res,rej)=>{const r=new FileReader();r.onload=e=>res(e.target.result.split(',')[1]);r.onerror=()=>rej(new Error('Read failed'));r.readAsDataURL(f);});}
+function getMime(n){const e=n.split('.').pop().toLowerCase();return e==='pdf'?'application/pdf':e==='csv'?'text/csv':'image/jpeg';}
+function wait(ms){return new Promise(r=>setTimeout(r,ms));}
+function show(id){document.querySelectorAll('.screen').forEach(s=>s.classList.remove('on'));document.getElementById(id).classList.add('on');}
+let stepCt=0;
+function buildProg(steps){stepCt=steps.length;document.getElementById('prog').innerHTML=steps.map((s,i)=>`<div class="pr"><div class="pdot wait" id="pd${i}"></div><span class="ptxt wait" id="pt${i}">${s}</span></div>`).join('');}
+function setAct(i){if(i>=stepCt)return;document.getElementById('pd'+i)?.setAttribute('class','pdot act');document.getElementById('pt'+i)?.setAttribute('class','ptxt act');}
+function setDone(i){if(i>=stepCt)return;document.getElementById('pd'+i)?.setAttribute('class','pdot done');document.getElementById('pt'+i)?.setAttribute('class','ptxt done');}
+</script>
+</body>
+</html>
