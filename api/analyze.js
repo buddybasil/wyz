@@ -120,7 +120,7 @@ export default async function handler(req, res) {
     }
 
     // Trim to safe size — Claude Sonnet handles ~200k input tokens but we cap to keep cost/speed sane
-    const trimmed = text.slice(0, 80000);
+    const trimmed = text.slice(0, 40000);
 
     const claudeRes = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
@@ -130,8 +130,8 @@ export default async function handler(req, res) {
         'anthropic-version': '2023-06-01',
       },
       body: JSON.stringify({
-        model: 'claude-sonnet-4-5',
-        max_tokens: 16000,
+        model: 'claude-haiku-4-5-20251001',
+        max_tokens: 8000,
         messages: [
           {role: 'user', content: `${EXTRACT_PROMPT}\n\nFile: ${filename || 'statement.pdf'}\n\nStatement text:\n${trimmed}`},
         ],
