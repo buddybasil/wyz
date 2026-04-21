@@ -246,12 +246,12 @@ html,body{height:100%;font-family:'DM Sans',sans-serif;background:var(--bg);colo
     <div class="rev-sub" id="rev-sub">Tap a category to reassign · trash to remove</div>
   </div>
   <div class="rev-filters" id="rev-filters">
-    <div class="rfilt on" onclick="filterReview('all',this)">All</div>
-    <div class="rfilt" onclick="filterReview('income',this)">Income</div>
-    <div class="rfilt" onclick="filterReview('expenses',this)">Expenses</div>
-    <div class="rfilt" onclick="filterReview('investments',this)">Investments</div>
-    <div class="rfilt" onclick="filterReview('loans',this)">Loans</div>
-    <div class="rfilt" onclick="filterReview('unknown',this)">Unmatched</div>
+    <div class="rfilt on" data-f="all" onclick="filterReview('all',this)">All</div>
+    <div class="rfilt" data-f="income" onclick="filterReview('income',this)">Income</div>
+    <div class="rfilt" data-f="expenses" onclick="filterReview('expenses',this)">Expenses</div>
+    <div class="rfilt" data-f="investments" onclick="filterReview('investments',this)">Investments</div>
+    <div class="rfilt" data-f="loans" onclick="filterReview('loans',this)">Loans</div>
+    <div class="rfilt" data-f="unknown" onclick="filterReview('unknown',this)">Unmatched</div>
   </div>
   <div class="rev-body" id="rev-body"></div>
   <div class="rev-actions">
@@ -284,14 +284,16 @@ html,body{height:100%;font-family:'DM Sans',sans-serif;background:var(--bg);colo
       </div>
     </div>
     <div class="mts">
-      <div class="mt on" onclick="sM('income',this)"><div class="mv" id="mv-i">—</div><div class="mlbl">Income</div></div>
-      <div class="mt" onclick="sM('expenses',this)"><div class="mv" id="mv-e">—</div><div class="mlbl">Expenses</div></div>
-      <div class="mt" onclick="sM('invest',this)"><div class="mv" id="mv-v">—</div><div class="mlbl">Investments</div></div>
-      <div class="mt" onclick="sM('loans',this)"><div class="mv" id="mv-l">—</div><div class="mlbl">Loans</div></div>
+      <div class="mt on" onclick="sM('all',this)"><div class="mv" id="mv-a">—</div><div class="mlbl" id="mlbl-a">All</div></div>
+      <div class="mt" onclick="sM('income',this)"><div class="mv" id="mv-i">—</div><div class="mlbl" id="mlbl-i">Income</div></div>
+      <div class="mt" onclick="sM('expenses',this)"><div class="mv" id="mv-e">—</div><div class="mlbl" id="mlbl-e">Expenses</div></div>
+      <div class="mt" onclick="sM('invest',this)"><div class="mv" id="mv-v">—</div><div class="mlbl" id="mlbl-v">Investments</div></div>
+      <div class="mt" onclick="sM('loans',this)"><div class="mv" id="mv-l">—</div><div class="mlbl" id="mlbl-l">Loans</div></div>
       <div class="mt" onclick="sM('pl',this)"><div class="mv">P&amp;L</div><div class="mlbl">Summary</div></div>
     </div>
   </div>
-  <div id="sb-income" class="sb"><div class="stab on" onclick="sS('income','direct',this)">Direct</div><div class="stab" onclick="sS('income','indirect',this)">Indirect</div></div>
+  <div id="sb-all" class="sb" style="display:none"><div class="stab on" onclick="sS('all','list',this)">All transactions</div></div>
+  <div id="sb-income" class="sb" style="display:none"><div class="stab on" onclick="sS('income','direct',this)">Direct</div><div class="stab" onclick="sS('income','indirect',this)">Indirect</div></div>
   <div id="sb-expenses" class="sb" style="display:none"><div class="stab on" onclick="sS('expenses','food',this)">Food</div><div class="stab" onclick="sS('expenses','shelter',this)">Shelter</div><div class="stab" onclick="sS('expenses','fees',this)">Fees</div><div class="stab" onclick="sS('expenses','transport',this)">Transport</div><div class="stab" onclick="sS('expenses','misc',this)">Misc</div></div>
   <div id="sb-invest" class="sb" style="display:none"><div class="stab on" onclick="sS('invest','all',this)">All plans</div></div>
   <div id="sb-loans" class="sb" style="display:none"><div class="stab on" onclick="sS('loans','main',this)">Both loans</div></div>
@@ -305,7 +307,7 @@ const WORKER_URL = '/api/analyze';
 
 // ══ STATE ══
 let files=[], allTxns=[], plData=null;
-let cM='income', cS={income:'direct',expenses:'food',invest:'all',loans:'main',pl:'monthly'};
+let cM='all', cS={all:'list',income:'direct',expenses:'food',invest:'all',loans:'main',pl:'monthly'};
 let activeFilter='all', editingIdx=null;
 
 // ══ CATEGORY CONFIG ══
@@ -414,15 +416,31 @@ async function startAnalysis(){
         try{
           const res=await fetch(WORKER_URL,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'extract',text,filename:files[i].name})});
           if(res.status===429||res.status===529){await wait(8000);continue;}
-          if(!res.ok) throw new Error(`Worker error ${res.status}`);
+          // 413 = file too large (v4 api) — don't retry, surface clean message
+          if(res.status===413){
+            const d=await res.json();
+            skipped.push({name:files[i].name,reason:'toolarge',detail:d.message});
+            document.getElementById('pd'+i)?.setAttribute('class','pdot wait');
+            document.getElementById('pt'+i).innerHTML=`⚠ Too large — please split: ${files[i].name.slice(0,25)}`;
+            document.getElementById('pt'+i)?.setAttribute('class','ptxt wait');
+            break;
+          }
+          if(!res.ok){
+            const errData=await res.json().catch(()=>({message:`HTTP ${res.status}`}));
+            throw new Error(errData.message||errData.error||`Worker error ${res.status}`);
+          }
           const d=await res.json();
-          if(d.error) throw new Error(d.error);
+          if(d.error) throw new Error(d.message||d.error);
           all.push(...(d.transactions||[]));
+          // Capture partial-success warnings (some chunks failed but others worked)
+          if(d.warning){
+            skipped.push({name:files[i].name,reason:'partial',detail:d.warning,count:d.count||0});
+          }
           success=true; break;
         }catch(e){
           if(attempt===0){await wait(5000);continue;}
           const isTimeout=e.message.includes('524')||e.message.includes('timeout')||e.message.toLowerCase().includes('network');
-          skipped.push({name:files[i].name,reason:isTimeout?'timeout':'error'});
+          skipped.push({name:files[i].name,reason:isTimeout?'timeout':'error',detail:e.message});
           document.getElementById('pd'+i)?.setAttribute('class','pdot wait');
           document.getElementById('pt'+i).innerHTML=`⚠ ${isTimeout?'Too large — needs splitting':'Failed'}: ${files[i].name.slice(0,25)}`;
           document.getElementById('pt'+i)?.setAttribute('class','ptxt wait');
@@ -431,7 +449,8 @@ async function startAnalysis(){
       if(success) setDone(i);
     }
     if(skipped.length){
-      const timeouts=skipped.filter(s=>s.reason==='timeout');
+      const timeouts=skipped.filter(s=>s.reason==='timeout'||s.reason==='toolarge');
+      const partials=skipped.filter(s=>s.reason==='partial');
       const errors=skipped.filter(s=>s.reason==='error');
       const w=document.createElement('div');
       w.style.cssText='background:#fef9ec;border:1px solid rgba(146,96,10,.3);border-radius:8px;padding:10px 12px;font-size:11px;color:#5c3c06;margin-top:10px;text-align:left;line-height:1.8';
@@ -441,9 +460,14 @@ async function startAnalysis(){
         msg+=timeouts.map(s=>`· ${s.name}`).join('<br>');
         msg+=`<br><br>📄 <strong>Fix:</strong> Split into monthly PDFs using <a href="https://smallpdf.com/split-pdf" target="_blank" style="color:#92600a;font-weight:600">smallpdf.com/split-pdf</a> (free), then upload the monthly files individually.`;
       }
+      if(partials.length){
+        msg+=`${timeouts.length?'<br><br>':''}<strong>⚠ ${partials.length} file${partials.length>1?'s':''} partially processed:</strong><br>`;
+        msg+=partials.map(s=>`· ${s.name} (${s.count||0} txns captured, some sections skipped)`).join('<br>');
+        msg+=`<br><br>📄 For complete coverage, split these PDFs into smaller files and re-upload.`;
+      }
       if(errors.length){
-        msg+=`${timeouts.length?'<br><br>':''}<strong>❌ ${errors.length} file${errors.length>1?'s':''}  failed:</strong><br>`;
-        msg+=errors.map(s=>`· ${s.name}`).join('<br>');
+        msg+=`${(timeouts.length||partials.length)?'<br><br>':''}<strong>❌ ${errors.length} file${errors.length>1?'s':''} failed:</strong><br>`;
+        msg+=errors.map(s=>`· ${s.name}${s.detail?' — '+s.detail.slice(0,80):''}`).join('<br>');
       }
       w.innerHTML=msg;
       document.querySelector('.pc').appendChild(w);
@@ -480,6 +504,21 @@ function filterReview(f,el){
 }
 
 function renderReview(){
+  // Update counts on each filter pill
+  const live=allTxns.filter(t=>!t._deleted);
+  const counts={
+    all: live.length,
+    income: live.filter(t=>t.cat==='income').length,
+    expenses: live.filter(t=>t.cat==='expenses').length,
+    investments: live.filter(t=>t.cat==='investments').length,
+    loans: live.filter(t=>t.cat==='loans').length,
+    unknown: live.filter(t=>t.cat==='expenses'&&t.type==='unknown').length,
+  };
+  document.querySelectorAll('.rfilt').forEach(el=>{
+    const f=el.getAttribute('data-f');
+    const lbl={all:'All',income:'Income',expenses:'Expenses',investments:'Investments',loans:'Loans',unknown:'Unmatched'}[f]||f;
+    el.textContent=`${lbl} (${counts[f]||0})`;
+  });
   const body=document.getElementById('rev-body');
   const visible=allTxns.filter(t=>{
     if(t._deleted) return false;
@@ -571,16 +610,35 @@ async function buildDashboard(){
   // Update header
   const incTot=plData.totals.income, expTot=plData.totals.expenses;
   const invTot=plData.totals.invest, loanTot=plData.totals.loans;
-  document.getElementById('dav').textContent='BA';
-  document.getElementById('dnm').textContent='Basil Abraham';
-  document.getElementById('dpd').textContent=`${plData.pl_months.length} months · ${active.length} transactions`;
+  document.getElementById('dav').textContent='W';
+  document.getElementById('dnm').textContent='Your money';
+  document.getElementById('dpd').textContent=`${plData.period_label.replace(/^Total · /,'')} · ${active.length} transactions`;
   document.getElementById('dsurp').textContent=`AED ${fmt(plData.surplus_avg)}/mo`;
+  // Counts per category
+  const cnt={
+    all: active.length,
+    income: active.filter(t=>t.cat==='income').length,
+    expenses: active.filter(t=>t.cat==='expenses').length,
+    investments: active.filter(t=>t.cat==='investments').length,
+    loans: active.filter(t=>t.cat==='loans').length,
+  };
+  document.getElementById('mv-a').textContent=''+cnt.all;
   document.getElementById('mv-i').textContent='AED '+fK(incTot);
   document.getElementById('mv-e').textContent='AED '+fK(expTot);
   document.getElementById('mv-v').textContent='AED '+fK(invTot);
   document.getElementById('mv-l').textContent='AED '+fK(loanTot);
+  // Add counts to labels
+  document.getElementById('mlbl-a').textContent='All';
+  document.getElementById('mlbl-i').textContent=`Income · ${cnt.income}`;
+  document.getElementById('mlbl-e').textContent=`Expenses · ${cnt.expenses}`;
+  document.getElementById('mlbl-v').textContent=`Investments · ${cnt.investments}`;
+  document.getElementById('mlbl-l').textContent=`Loans · ${cnt.loans}`;
+  // Reset tabs to All + default to All view
+  document.querySelectorAll('.mt').forEach(t=>t.classList.remove('on'));
+  document.querySelector('.mt').classList.add('on'); // first .mt is All
+  cM='all'; cS.all='list';
   document.querySelectorAll('[id^=sb-]').forEach(sb=>sb.style.display='none');
-  document.getElementById('sb-income').style.display='flex';
+  document.getElementById('sb-all').style.display='flex';
   renderDash();
 }
 
@@ -602,14 +660,25 @@ function computePL(txns){
   });
   const n=pl_months.length||1;
   const totals=pl_months.reduce((a,r)=>({income:a.income+r.inc,expenses:a.expenses+r.exp,invest:a.invest+r.inv,loans:a.loans+r.loans}),{income:0,expenses:0,invest:0,loans:0});
-  return{pl_months,totals,surplus_avg:Math.round((totals.income-totals.expenses-totals.invest-totals.loans)/n),months:n};
+  // Build a human-readable period label from actual data
+  const MO2={'01':'Jan','02':'Feb','03':'Mar','04':'Apr','05':'May','06':'Jun','07':'Jul','08':'Aug','09':'Sep','10':'Oct','11':'Nov','12':'Dec'};
+  const ymKeys=Object.keys(monthMap).filter(k=>k!=='unknown').sort();
+  let period_label='Total';
+  if(ymKeys.length){
+    const first=ymKeys[0], last=ymKeys[ymKeys.length-1];
+    const [fy,fm]=first.split('-'), [ly,lm]=last.split('-');
+    period_label=first===last
+      ? `Total · ${MO2[fm]} ${fy.slice(2)}`
+      : `Total · ${MO2[fm]} ${fy.slice(2)} – ${MO2[lm]} ${ly.slice(2)}`;
+  }
+  return{pl_months,totals,surplus_avg:Math.round((totals.income-totals.expenses-totals.invest-totals.loans)/n),months:n,period_label};
 }
 
 // ══ DASHBOARD RENDER ══
 function sM(id,el){
   cM=id;
   document.querySelectorAll('.mt').forEach(t=>t.classList.remove('on'));el.classList.add('on');
-  ['income','expenses','invest','loans','pl'].forEach(k=>{const sb=document.getElementById('sb-'+k);if(sb)sb.style.display=k===id?'flex':'none';});
+  ['all','income','expenses','invest','loans','pl'].forEach(k=>{const sb=document.getElementById('sb-'+k);if(sb)sb.style.display=k===id?'flex':'none';});
   renderDash();
 }
 function sS(main,sub,el){cS[main]=sub;document.querySelectorAll(`#sb-${main} .stab`).forEach(t=>t.classList.remove('on'));el.classList.add('on');renderDash();}
@@ -627,7 +696,26 @@ function renderDash(){
     return Object.entries(g).sort(([,a],[,b])=>b.amt-a.amt).map(([n,v])=>({n,s:'',f:v.freq,a:v.amt,avoidable:v.avoidable,note:v.note}));
   }
 
-  if(m==='income'){
+  if(m==='all'){
+    // All transactions view — chronological list, colored by category
+    const sorted=[...txns].sort((a,b)=>(b.date||'').localeCompare(a.date||''));
+    const totCr=txns.filter(t=>t.direction==='CR').reduce((a,t)=>a+(Number(t.amount)||0),0);
+    const totDr=txns.filter(t=>t.direction==='DR').reduce((a,t)=>a+(Number(t.amount)||0),0);
+    h+=stats2([{l:d.period_label||'All',v:''+txns.length+' txns',c:''},{l:'Money in',v:'AED '+fmt(totCr),c:'G'},{l:'Money out',v:'AED '+fmt(totDr),c:'R'}]);
+    h+=secl('All transactions (newest first)');
+    h+=`<div class="ig">`;
+    if(!sorted.length){h+=`<div style="padding:14px 0;text-align:center;font-size:12px;color:var(--t3)">No transactions</div>`;}
+    sorted.forEach(t=>{
+      const catInfo=CATS[t.cat]; const catCls=catInfo?catInfo.color:'';
+      const color=t.direction==='CR'?'G':(t.cat==='loans'?'B':(t.cat==='investments'?'B':'R'));
+      const sign=t.direction==='CR'?'+':'−';
+      const dateStr=(t.date||'').slice(5).replace('-','/');
+      const catLbl=catInfo?catInfo.label:t.cat;
+      h+=ir(`${t.merchant}`,`${dateStr} · ${catLbl}${t.type&&t.type!=='other'?' · '+t.type.replace(/_/g,' '):''}`,'',`${sign}AED ${fmt(t.amount)}`,color,'');
+    });
+    h+=`</div>`;
+  }
+  else if(m==='income'){
     const direct=catTxns('income','direct'), indirect=catTxns('income','indirect');
     if(s==='direct'){
       h+=stats2([{l:'Total',v:'AED '+fmt(sumAmt(direct)),c:'G'},{l:'Monthly avg',v:'AED '+fmt(Math.round(sumAmt(direct)/d.months))},{l:'Months',v:''+d.months}]);
@@ -646,7 +734,7 @@ function renderDash(){
     const txnsInSub=catTxns('expenses',sub);
     const tot=sumAmt(txnsInSub);
     const avoidable=txnsInSub.filter(t=>t.avoidable);
-    h+=stats2([{l:'Total (6 mo)',v:'AED '+fmt(tot),c:'R'},{l:'Monthly avg',v:'AED '+fmt(Math.round(tot/d.months))},{l:'Transactions',v:''+txnsInSub.length}]);
+    h+=stats2([{l:d.period_label||'Total',v:'AED '+fmt(tot),c:'R'},{l:'Monthly avg',v:'AED '+fmt(Math.round(tot/d.months))},{l:'Transactions',v:''+txnsInSub.length}]);
     if(avoidable.length){
       h+=secl('Avoidable charges');
       avoidable.forEach(t=>{h+=`<div class="flg"><div class="flt">${t.merchant} — AED ${fmt(t.amount)}</div>${t.flag||'Avoidable charge'}</div>`;});
@@ -660,7 +748,7 @@ function renderDash(){
   else if(m==='invest'){
     const inv=catTxns('investments');
     const tot=sumAmt(inv);
-    h+=stats2([{l:'Total (6 mo)',v:'AED '+fmt(tot),c:'B'},{l:'Monthly avg',v:'AED '+fmt(Math.round(tot/d.months))},{l:'Plans',v:''+new Set(inv.map(t=>t.merchant)).size}]);
+    h+=stats2([{l:d.period_label||'Total',v:'AED '+fmt(tot),c:'B'},{l:'Monthly avg',v:'AED '+fmt(Math.round(tot/d.months))},{l:'Plans',v:''+new Set(inv.map(t=>t.merchant)).size}]);
     h+=secl('Investment plans');h+=`<div class="ig">`;
     groupMerchant(inv).forEach(it=>{h+=ir(it.n,it.note||'',ftg(it.f),'AED '+fmt(it.a),'B','');});
     h+=`</div>`;
@@ -668,11 +756,11 @@ function renderDash(){
   else if(m==='loans'){
     const loans=catTxns('loans');
     const tot=sumAmt(loans);
-    h+=stats2([{l:'Total (6 mo)',v:'AED '+fmt(tot),c:'B'},{l:'Monthly',v:'AED '+fmt(Math.round(tot/d.months))},{l:'% salary',v:Math.round(tot/d.months/31026*100)+'%'}]);
+    const salaryMonthly=d.totals.income/(d.months||1)||1;
+    h+=stats2([{l:d.period_label||'Total',v:'AED '+fmt(tot),c:'B'},{l:'Monthly',v:'AED '+fmt(Math.round(tot/d.months))},{l:'% income',v:Math.round(tot/d.months/salaryMonthly*100)+'%'}]);
     h+=secl('Loan repayments');h+=`<div class="ig">`;
     groupMerchant(loans).forEach(it=>{h+=ir(it.n,'',ftg('monthly'),'AED '+fmt(it.a/d.months),'B','/mo');});
     h+=`</div>`;
-    h+=ins('G','Loan-to-income ratio within healthy range. Both loans paid on schedule with zero missed payments.');
   }
   else if(m==='pl'){
     if(s==='monthly'){
