@@ -1,26 +1,20 @@
-// ══ MONEYWIZE API — Universal Bank Statement Analyzer (v4) ══
-// Claude Haiku 4.5, with robust error handling for any PDF.
+// ══ WYZ API — Universal Bank Statement Analyzer + Insights (v5) ══
+// Claude Haiku 4.5. Two actions: "extract" (parse PDF text to txns) + "insight" (generate one sharp observation).
 // Requires env variable: ANTHROPIC_API_KEY
-//
-// Design goals:
-// 1. Never crash silently — always return a helpful JSON response.
-// 2. Partial success is OK — report what worked + what failed.
-// 3. Respect user time — cap total work to stay under Vercel's 60s limit.
-// 4. Guard against rate limits with concurrency cap + retry.
-// 5. Surface clear, actionable error messages.
 
-// ══ CONFIG ══
 const MODEL               = 'claude-haiku-4-5-20251001';
 const MAX_TOKENS          = 8000;
-const CHUNK_SIZE          = 45000;        // chars per Claude call
-const MAX_TOTAL_CHARS     = 400000;       // hard cap per file
-const REJECT_ABOVE_CHARS  = 800000;       // reject & ask user to split
-const CLAUDE_TIMEOUT_MS   = 45000;        // per-call timeout
-const MAX_CONCURRENT      = 3;            // parallel Claude calls per request
-const MAX_RETRIES         = 1;            // retry once on 429/529
+const INSIGHT_MAX_TOKENS  = 400;
+const CHUNK_SIZE          = 45000;
+const MAX_TOTAL_CHARS     = 400000;
+const REJECT_ABOVE_CHARS  = 800000;
+const CLAUDE_TIMEOUT_MS   = 45000;
+const INSIGHT_TIMEOUT_MS  = 20000;
+const MAX_CONCURRENT      = 3;
+const MAX_RETRIES         = 1;
 const RETRY_DELAY_MS      = 1500;
 
-// ══ TAXONOMY ══
+// ══ TAXONOMY (same as v4) ══
 const TAXONOMY_PROMPT = `
 CATEGORIES (pick one as "cat"):
 - "income"      → money coming in (salary, refunds, cashback, dividends, rental income, inter-account transfers IN)
@@ -61,74 +55,91 @@ CRITICAL CLASSIFICATION RULES:
 1. **Insurance** — distinguish carefully:
    - LIFE insurance (Zurich Life, Aviva, MetLife, LIC, HDFC Life, Sukoon Life) → cat="investments", type="life_insurance"
    - MOTOR insurance (NEXT CAR, car insurance, auto insurance) → cat="expenses", sub="misc", type="insurance", avoidable=false
-   - HEALTH insurance (medical, health cover) → cat="expenses", sub="misc", type="insurance", avoidable=false
+   - HEALTH insurance → cat="expenses", sub="misc", type="insurance", avoidable=false
    - TRAVEL/HOME/OTHER insurance → cat="expenses", sub="misc", type="insurance", avoidable=false
-   - Unspecified "LIVA INSURANCE", "ALLIANCE INSURANCE", "POLICY BAZAAR" → default expenses/misc/insurance UNLESS description clearly indicates life policy
-   - Insurance REFUNDS/REIMBURSEMENTS → cat="income", type="insurance_reimbursement"
+   - Unspecified "LIVA", "ALLIANCE INSURANCE", "POLICY BAZAAR" → default expenses/misc/insurance UNLESS clearly life
+   - Insurance REFUNDS → cat="income", type="insurance_reimbursement"
 
 2. **Credit card bill payments** — BOTH directions go to "loans":
-   - Bank statement: "CREDIT CARD PAYMNT", "CC PAYMENT" (debit) → cat="loans", sub="main", type="card_payment", avoidable=false, direction="DR"
-   - Card statement: "PAYMENT RECEIVED", "PAYMENT - THANK YOU" (credit) → cat="loans", sub="main", type="card_payment_received", avoidable=false, direction="CR"
+   - Bank: "CREDIT CARD PAYMNT", "CC PAYMENT" (debit) → cat="loans", type="card_payment", direction="DR"
+   - Card: "PAYMENT RECEIVED", "PAYMENT - THANK YOU" (credit) → cat="loans", type="card_payment_received", direction="CR"
 
-3. **Loan/EMI** — "INSTALLMENT RECOVERY", "EMI", "MORTGAGE" → cat="loans", sub="main", type="loan_installment"
+3. **Loan/EMI** — "INSTALLMENT RECOVERY", "EMI", "MORTGAGE" → cat="loans", type="loan_installment"
 
-4. **Inter-account transfers** (same name sender/receiver, e.g. "MBTRF B/O BASIL ABRAHAM"):
-   - Credit → cat="income", sub="indirect", type="transfer_in"
-   - Debit → cat="expenses", sub="misc", type="transfer_out", avoidable=false
+4. **Inter-account transfers** (same name sender/receiver):
+   - CR → cat="income", sub="indirect", type="transfer_in"
+   - DR → cat="expenses", sub="misc", type="transfer_out"
 
-5. **Government fees/fines** (ADB POLICE, SMARTDXB, TASJEEL, RTA, DMV) → cat="expenses", sub="transport", type="gov_services"
+5. **Gov fees/fines** (POLICE, SMARTDXB, TASJEEL, RTA, DMV) → cat="expenses", sub="transport", type="gov_services"
 
 6. **Telecom/utility** (DU, ETISALAT, VIRGIN, E&, Verizon, AT&T) → cat="expenses", sub="shelter", type="internet_phone"
 
 7. **Salary** always cat="income", sub="direct", type="salary", freq="monthly"
 `.trim();
 
-const EXTRACT_PROMPT = `You are a financial transaction analyzer. You receive raw text extracted from a bank or credit card statement (any country, any bank, any currency) and return clean structured transactions.
+const EXTRACT_PROMPT = `You are a financial transaction analyzer. You receive raw text from a bank/credit-card statement (any country/bank/currency) and return clean structured transactions.
 
-TASK: Extract every real transaction. Ignore headers, balances, summaries, totals, interest-rate disclosures, terms & conditions, cashback summary rows, and all boilerplate — only actual transactions.
+TASK: Extract every real transaction. Ignore headers, balances, summaries, totals, interest-rate disclosures, T&Cs, cashback rollup rows, and all boilerplate.
 
-For each transaction:
+Each transaction:
 {
   "date": "YYYY-MM-DD",
-  "merchant": cleaned description (strip ref numbers, card digits, transaction IDs),
+  "merchant": cleaned description (strip ref numbers, card digits, tx IDs),
   "amount": positive number (no currency symbol),
-  "currency": ISO code (AED, USD, INR, GBP, EUR, etc.),
-  "direction": "CR" for money IN, "DR" for money OUT,
-  "cat": category from taxonomy,
-  "sub": sub-category from taxonomy,
-  "type": specific type from taxonomy,
-  "freq": frequency from taxonomy,
-  "avoidable": true or false,
+  "currency": ISO code,
+  "direction": "CR" (in) or "DR" (out),
+  "cat": category,
+  "sub": sub-category,
+  "type": type,
+  "freq": frequency,
+  "avoidable": boolean,
   "note": short context (<=40 chars) or null
 }
 
 ${TAXONOMY_PROMPT}
 
-GLOBAL MERCHANT GUIDE (use your knowledge):
+GLOBAL MERCHANT GUIDE:
 - Starbucks/Costa/Tim Hortons → dining_out
 - Shell/BP/ADNOC/ENOC/EPPCO/EMARAT/Exxon → fuel
 - Netflix/Spotify/Disney+/Prime/Apple.com/iTunes → subscription
-- Amazon/Noon/Flipkart/eBay → online_shopping
+- Amazon/Noon/Flipkart → online_shopping
 - Uber/Lyft/Ola/Careem → ride_hail
-- Talabat/Deliveroo/DoorDash/Swiggy/Zomato/Noon Food → food_delivery
+- Talabat/Deliveroo/DoorDash/Swiggy/Zomato → food_delivery
 - Lulu/Carrefour/Spinneys/Waitrose/Tesco → supermarket
 - SELFDRIVE/GLOMO (car rental) → car_rental, avoidable=false
-- TAMARA/TABBY (BNPL) → online_shopping unless underlying purchase clear
+- TAMARA/TABBY (BNPL) → online_shopping
 
-OUTPUT: Return ONLY a valid JSON array. No preamble, no code fences, no commentary. If no transactions, return [].`;
+OUTPUT: JSON array only. No preamble, no code fences. If none, return [].`;
+
+// ══ INSIGHT PROMPT — tuned for short, specific, behaviorally-useful observations ══
+const INSIGHT_PROMPT = `You are a thoughtful financial coach. Given a user's categorized spending summary, write ONE single observation that will stick with them psychologically before their next spending decision.
+
+RULES — these matter:
+1. Be SPECIFIC: name amounts and merchants, not categories. "AED 847 on Talabat" not "you spend a lot on food."
+2. Be COMPARATIVE: compare to the past self or to income, never to strangers or national averages.
+3. Be ACTIONABLE: hint at the next decision they'll face, don't lecture.
+4. Be KIND: no shame, no "you should," no moralizing. Treat the user as an intelligent adult.
+5. Be BRIEF: 2-3 sentences max, plain language, no financial jargon.
+6. Find what's actually INTERESTING, not what's obvious. Don't say "your biggest category is food." Say something they didn't notice.
+7. If there is nothing surprising, say something encouraging and honest ("Your spending looks steady month-over-month — biggest line is rent at X.") — do NOT invent drama.
+
+OUTPUT FORMAT — return ONLY a JSON object, no preamble:
+{
+  "headline": "The one sentence that matters, max ~120 chars",
+  "detail": "Optional 1-sentence expansion with the specific number/math, max ~180 chars",
+  "tone": "neutral" | "warning" | "encouraging"
+}
+
+The headline is the critical piece — it's what the user will remember.`;
 
 // ══ TEXT CLEANING ══
 function cleanStatementText(text) {
   if (!text) return '';
   let cleaned = text;
-
-  // Strip non-Latin scripts (Arabic, Hebrew, Devanagari, CJK, etc.)
   cleaned = cleaned.replace(
     /[\u0590-\u05FF\u0600-\u06FF\u0700-\u074F\u0750-\u077F\u0780-\u07BF\u0900-\u097F\u3000-\u303F\u3040-\u309F\u30A0-\u30FF\u3400-\u4DBF\u4E00-\u9FFF\uAC00-\uD7AF\u0E00-\u0E7F\u08A0-\u08FF\uFB50-\uFDFF\uFE70-\uFEFF]/g,
     ''
   );
-
-  // Truncate at end-of-statement markers
   const endMarkers = [
     /\*{3,}\s*END\s*OF\s*STATEMENT\s*\*{3,}/i,
     /End\s*of\s*Transaction\s*Details/i,
@@ -137,24 +148,16 @@ function cleanStatementText(text) {
     const pos = cleaned.search(m);
     if (pos > 0) { cleaned = cleaned.slice(0, pos); break; }
   }
-
-  // Strip disclaimer blocks
   cleaned = cleaned.replace(/General Terms and Important Information[\s\S]*$/i, '');
   cleaned = cleaned.replace(/Terms\s+(and|&)\s+Conditions[\s\S]{200,}$/i, '');
   cleaned = cleaned.replace(/Important (Information|Notice|Disclaimer)[\s\S]{200,}$/i, '');
   cleaned = cleaned.replace(/Disclaimer[\s\S]{200,}$/i, '');
-
-  // Strip URLs & emails
   cleaned = cleaned.replace(/https?:\/\/\S+/g, '');
   cleaned = cleaned.replace(/[\w.-]+@[\w.-]+\.\w+/g, '');
-
-  // Normalize whitespace
   cleaned = cleaned.replace(/[ \t]+/g, ' ').replace(/\n{3,}/g, '\n\n').trim();
-
   return cleaned;
 }
 
-// ══ CHUNK ON LINE BOUNDARIES ══
 function chunkText(text, size = CHUNK_SIZE) {
   if (text.length <= size) return [text];
   const chunks = [];
@@ -162,8 +165,7 @@ function chunkText(text, size = CHUNK_SIZE) {
   let current = '';
   for (const line of lines) {
     if ((current + '\n' + line).length > size && current.length > 0) {
-      chunks.push(current);
-      current = line;
+      chunks.push(current); current = line;
     } else {
       current = current ? current + '\n' + line : line;
     }
@@ -172,14 +174,12 @@ function chunkText(text, size = CHUNK_SIZE) {
   return chunks;
 }
 
-// ══ CORS ══
 function setCors(res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 }
 
-// ══ PARSE JSON ARRAY — tolerant of code fences + stray text ══
 function parseJsonArray(raw) {
   if (!raw) return [];
   const clean = raw.replace(/```json|```/g, '').trim();
@@ -190,7 +190,16 @@ function parseJsonArray(raw) {
   catch { return []; }
 }
 
-// ══ NORMALIZE TXN ══
+function parseJsonObject(raw) {
+  if (!raw) return null;
+  const clean = raw.replace(/```json|```/g, '').trim();
+  const start = clean.indexOf('{');
+  const end = clean.lastIndexOf('}');
+  if (start === -1 || end === -1) return null;
+  try { return JSON.parse(clean.slice(start, end + 1)); }
+  catch { return null; }
+}
+
 const VALID_EXP_SUBS = new Set(['food', 'shelter', 'transport', 'fees', 'misc']);
 const VALID_CATS = new Set(['income', 'expenses', 'investments', 'loans']);
 
@@ -216,14 +225,12 @@ function normalizeTxn(t) {
   };
 }
 
-// ══ SLEEP ══
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
-// ══ CALL CLAUDE — with timeout + retry on transient errors ══
-async function callClaude(text, filename, apiKey, chunkLabel = '', attempt = 1) {
+// ══ CLAUDE CALL (shared, with timeout + retry) ══
+async function callClaude({prompt, userContent, apiKey, maxTokens, timeoutMs, attempt = 1}) {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), CLAUDE_TIMEOUT_MS);
-
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const res = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
@@ -235,54 +242,51 @@ async function callClaude(text, filename, apiKey, chunkLabel = '', attempt = 1) 
       signal: controller.signal,
       body: JSON.stringify({
         model: MODEL,
-        max_tokens: MAX_TOKENS,
-        messages: [{
-          role: 'user',
-          content: `${EXTRACT_PROMPT}\n\nFile: ${filename || 'statement.pdf'}${chunkLabel ? ` (${chunkLabel})` : ''}\n\nStatement text:\n${text}`,
-        }],
+        max_tokens: maxTokens,
+        messages: [{role: 'user', content: `${prompt}\n\n${userContent}`}],
       }),
     });
     clearTimeout(timer);
-
-    // Retry on rate-limit (429) or overload (529)
     if ((res.status === 429 || res.status === 529) && attempt <= MAX_RETRIES) {
       await sleep(RETRY_DELAY_MS * attempt);
-      return callClaude(text, filename, apiKey, chunkLabel, attempt + 1);
+      return callClaude({prompt, userContent, apiKey, maxTokens, timeoutMs, attempt: attempt + 1});
     }
-
     if (!res.ok) {
       const errText = await res.text();
       const code = res.status;
-      // Map common codes to actionable messages
       if (code === 401) throw new Error('auth_failed: API key invalid');
-      if (code === 429) throw new Error('rate_limit: too many requests, please retry shortly');
-      if (code === 529) throw new Error('overloaded: Anthropic servers busy, please retry');
-      if (code >= 500) throw new Error(`server_error: Claude returned ${code}`);
+      if (code === 429) throw new Error('rate_limit: too many requests');
+      if (code === 529) throw new Error('overloaded: Anthropic servers busy');
+      if (code >= 500) throw new Error(`server_error: ${code}`);
       throw new Error(`claude_error: ${code} — ${errText.slice(0, 120)}`);
     }
-
     const data = await res.json();
-    const raw = data?.content?.[0]?.text || '';
-    return parseJsonArray(raw);
+    return data?.content?.[0]?.text || '';
   } catch (err) {
     clearTimeout(timer);
-    if (err.name === 'AbortError') throw new Error('timeout: Claude took >45s');
+    if (err.name === 'AbortError') throw new Error('timeout: Claude took too long');
     throw err;
   }
 }
 
-// ══ RUN CHUNKS WITH CONCURRENCY CAP ══
+// ══ EXTRACT: run chunks with concurrency cap ══
 async function runChunksConcurrent(chunks, filename, apiKey) {
   const results = new Array(chunks.length);
   const errors = new Array(chunks.length).fill(null);
   let idx = 0;
-
   async function worker() {
     while (idx < chunks.length) {
       const myIdx = idx++;
       const label = chunks.length > 1 ? `part ${myIdx + 1}/${chunks.length}` : '';
       try {
-        results[myIdx] = await callClaude(chunks[myIdx], filename, apiKey, label);
+        const raw = await callClaude({
+          prompt: EXTRACT_PROMPT,
+          userContent: `File: ${filename || 'statement.pdf'}${label ? ` (${label})` : ''}\n\nStatement text:\n${chunks[myIdx]}`,
+          apiKey,
+          maxTokens: MAX_TOKENS,
+          timeoutMs: CLAUDE_TIMEOUT_MS,
+        });
+        results[myIdx] = parseJsonArray(raw);
       } catch (err) {
         console.error(`Chunk ${myIdx + 1} failed:`, err.message);
         errors[myIdx] = err.message;
@@ -290,10 +294,153 @@ async function runChunksConcurrent(chunks, filename, apiKey) {
       }
     }
   }
-
   const workerCount = Math.min(MAX_CONCURRENT, chunks.length);
   await Promise.all(Array.from({length: workerCount}, () => worker()));
   return {results, errors};
+}
+
+// ══ HANDLER: extract action ══
+async function handleExtract(req, res, apiKey) {
+  const {text, filename} = req.body || {};
+  if (!text || typeof text !== 'string') {
+    return res.status(400).json({
+      error: 'missing_text',
+      message: 'No statement text provided. The PDF may be image-only or password-protected.',
+    });
+  }
+  if (text.length > REJECT_ABOVE_CHARS) {
+    return res.status(413).json({
+      error: 'file_too_large',
+      message: `This statement is very large (${Math.round(text.length / 1000)}k characters). Please split the PDF into smaller files and re-upload.`,
+      size_chars: text.length,
+      limit_chars: REJECT_ABOVE_CHARS,
+      suggestion: 'split_and_retry',
+    });
+  }
+  let cleaned = cleanStatementText(text);
+  if (cleaned.length < 50) {
+    return res.status(200).json({
+      transactions: [], count: 0, filename,
+      warning: 'This file contained very little readable text. It may be image-only, password-protected, or not a statement.',
+    });
+  }
+  const originalLen = cleaned.length;
+  let truncated = false;
+  if (cleaned.length > MAX_TOTAL_CHARS) {
+    cleaned = cleaned.slice(0, MAX_TOTAL_CHARS);
+    truncated = true;
+  }
+  const chunks = chunkText(cleaned);
+  const {results, errors} = await runChunksConcurrent(chunks, filename, apiKey);
+  const chunksFailed = errors.filter(e => e).length;
+  const chunksTotal = chunks.length;
+  const chunksOk = chunksTotal - chunksFailed;
+  if (chunksFailed === chunksTotal && chunksTotal > 0) {
+    const firstErr = errors.find(e => e) || 'unknown error';
+    const [code, detail] = firstErr.split(':').map(s => s.trim());
+    return res.status(502).json({
+      error: code || 'extraction_failed',
+      message: detail || 'Could not extract transactions. Please retry.',
+      chunks_total: chunksTotal, chunks_failed: chunksFailed,
+    });
+  }
+  const all = results.flat().map(normalizeTxn).filter(t => t.date && t.amount > 0);
+  const seen = new Map();
+  const unique = [];
+  for (const t of all) {
+    const key = `${t.date}|${t.amount}|${t.merchant.slice(0, 20).toLowerCase()}|${t.direction}`;
+    const count = seen.get(key) || 0;
+    if (count < 3) { seen.set(key, count + 1); unique.push(t); }
+  }
+  const response = {
+    transactions: unique, count: unique.length, filename: filename || null,
+    chunks_total: chunksTotal, chunks_ok: chunksOk, chunks_failed: chunksFailed,
+  };
+  if (chunksFailed > 0) {
+    // Surface the actual underlying error messages so users/devs can diagnose
+    const errSamples = errors.filter(e => e).slice(0, 3);
+    const errSummary = errSamples.map(e => e.split(':')[0]).join(', ');
+    response.warning = `${chunksFailed} of ${chunksTotal} sections failed (${errSummary}). Results may be incomplete — consider splitting this file.`;
+    response.error_details = errSamples;
+    response.suggestion = 'partial_split_recommended';
+  }
+  if (truncated) {
+    response.warning = (response.warning ? response.warning + ' Additionally, ' : '') +
+      `this file was truncated at ${MAX_TOTAL_CHARS} chars (original was ${originalLen}). Split for complete analysis.`;
+  }
+  if (unique.length === 0 && chunksFailed === 0) {
+    // Chunk succeeded but produced zero parseable transactions — usually a summary/non-statement page
+    response.warning = 'No transactions were found in this file. It may be a summary page, cover page, or unsupported statement format.';
+    response.diagnostic = {
+      cleaned_chars: cleaned.length,
+      chunks_processed: chunksTotal,
+      sample_text: cleaned.slice(0, 200),
+    };
+  }
+  return res.status(200).json(response);
+}
+
+// ══ HANDLER: insight action ══
+async function handleInsight(req, res, apiKey) {
+  const {summary} = req.body || {};
+  if (!summary || typeof summary !== 'object') {
+    return res.status(400).json({
+      error: 'missing_summary',
+      message: 'No summary data provided.',
+    });
+  }
+  // Build a compact user-facing summary string for Claude
+  const userContent = `Spending summary (${summary.period || 'recent period'}):
+
+Income:        AED ${summary.totals?.income || 0}
+Expenses:      AED ${summary.totals?.expenses || 0}
+Investments:   AED ${summary.totals?.investments || 0}
+Loan/card pmt: AED ${summary.totals?.loans || 0}
+Net surplus:   AED ${(summary.totals?.income || 0) - (summary.totals?.expenses || 0) - (summary.totals?.investments || 0) - (summary.totals?.loans || 0)} over ${summary.months || 1} months
+
+Top expenses by merchant (${summary.top_merchants?.length || 0}):
+${(summary.top_merchants || []).slice(0, 15).map(m => `- ${m.merchant}: AED ${m.total} (${m.count}x, ${m.category})`).join('\n')}
+
+Spend by sub-category:
+${Object.entries(summary.by_sub || {}).map(([k, v]) => `- ${k}: AED ${v}`).join('\n')}
+
+Avoidable spending total: AED ${summary.avoidable_total || 0} across ${summary.avoidable_count || 0} transactions.
+
+${summary.month_over_month ? `Month-over-month: ${summary.month_over_month}` : ''}
+
+Now write ONE observation per the rules.`;
+
+  try {
+    const raw = await callClaude({
+      prompt: INSIGHT_PROMPT,
+      userContent,
+      apiKey,
+      maxTokens: INSIGHT_MAX_TOKENS,
+      timeoutMs: INSIGHT_TIMEOUT_MS,
+    });
+    const obj = parseJsonObject(raw);
+    if (!obj || !obj.headline) {
+      return res.status(200).json({
+        headline: null,
+        detail: null,
+        tone: 'neutral',
+        warning: 'Could not generate insight — please try again',
+      });
+    }
+    return res.status(200).json({
+      headline: String(obj.headline).slice(0, 200),
+      detail: obj.detail ? String(obj.detail).slice(0, 250) : null,
+      tone: ['neutral', 'warning', 'encouraging'].includes(obj.tone) ? obj.tone : 'neutral',
+    });
+  } catch (err) {
+    console.error('Insight error:', err.message);
+    return res.status(200).json({
+      headline: null,
+      detail: null,
+      tone: 'neutral',
+      warning: err.message,
+    });
+  }
 }
 
 // ══ MAIN HANDLER ══
@@ -311,116 +458,13 @@ export default async function handler(req, res) {
   }
 
   try {
-    const {action, text, filename} = req.body || {};
-
-    if (action !== 'extract') {
-      return res.status(400).json({
-        error: 'bad_action',
-        message: 'Unknown action. Expected "extract".',
-      });
-    }
-    if (!text || typeof text !== 'string') {
-      return res.status(400).json({
-        error: 'missing_text',
-        message: 'No statement text provided. The PDF may be image-only or password-protected.',
-      });
-    }
-
-    // ─── Pre-flight size check ───
-    if (text.length > REJECT_ABOVE_CHARS) {
-      return res.status(413).json({
-        error: 'file_too_large',
-        message: `This statement is very large (${Math.round(text.length / 1000)}k characters). Please split the PDF into smaller files (e.g. one statement per month) and re-upload.`,
-        size_chars: text.length,
-        limit_chars: REJECT_ABOVE_CHARS,
-        suggestion: 'split_and_retry',
-      });
-    }
-
-    // ─── Clean ───
-    let cleaned = cleanStatementText(text);
-    if (cleaned.length < 50) {
-      return res.status(200).json({
-        transactions: [],
-        count: 0,
-        filename,
-        warning: 'This file contained very little readable text. It may be image-only, password-protected, or not a statement. Try OCR or a different PDF.',
-      });
-    }
-
-    // Secondary cap (should rarely trigger given REJECT_ABOVE_CHARS check)
-    const originalLen = cleaned.length;
-    let truncated = false;
-    if (cleaned.length > MAX_TOTAL_CHARS) {
-      cleaned = cleaned.slice(0, MAX_TOTAL_CHARS);
-      truncated = true;
-    }
-
-    // ─── Chunk ───
-    const chunks = chunkText(cleaned);
-
-    // ─── Extract with concurrency cap + retry ───
-    const {results, errors} = await runChunksConcurrent(chunks, filename, apiKey);
-
-    const chunksFailed = errors.filter(e => e).length;
-    const chunksTotal = chunks.length;
-    const chunksOk = chunksTotal - chunksFailed;
-
-    // If ALL chunks failed, surface the first error properly
-    if (chunksFailed === chunksTotal && chunksTotal > 0) {
-      const firstErr = errors.find(e => e) || 'unknown error';
-      const [code, detail] = firstErr.split(':').map(s => s.trim());
-      return res.status(502).json({
-        error: code || 'extraction_failed',
-        message: detail || 'Could not extract transactions. Please retry.',
-        chunks_total: chunksTotal,
-        chunks_failed: chunksFailed,
-      });
-    }
-
-    // ─── Normalize + dedupe ───
-    // Dedupe key: date + amount + first 20 chars of merchant + direction
-    // Allow up to 3 identical-key entries (legit repeats like 3 fuel fills same day)
-    const all = results.flat().map(normalizeTxn).filter(t => t.date && t.amount > 0);
-    const seen = new Map();
-    const unique = [];
-    for (const t of all) {
-      const key = `${t.date}|${t.amount}|${t.merchant.slice(0, 20).toLowerCase()}|${t.direction}`;
-      const count = seen.get(key) || 0;
-      if (count < 3) {
-        seen.set(key, count + 1);
-        unique.push(t);
-      }
-    }
-
-    // ─── Build response ───
-    const response = {
-      transactions: unique,
-      count: unique.length,
-      filename: filename || null,
-      chunks_total: chunksTotal,
-      chunks_ok: chunksOk,
-      chunks_failed: chunksFailed,
-    };
-
-    // Partial-failure warning
-    if (chunksFailed > 0) {
-      response.warning = `${chunksFailed} of ${chunksTotal} sections of this file timed out or errored. The results may be incomplete. Consider splitting this file into smaller PDFs and re-uploading.`;
-      response.suggestion = 'partial_split_recommended';
-    }
-
-    // Truncation warning (defensive — should not usually happen)
-    if (truncated) {
-      response.warning = (response.warning ? response.warning + ' Additionally, ' : '') +
-        `this file was truncated at ${MAX_TOTAL_CHARS} characters (original was ${originalLen}). Please split it for complete analysis.`;
-    }
-
-    // Zero-transaction diagnostic
-    if (unique.length === 0 && chunksFailed === 0) {
-      response.warning = 'No transactions were found in this file. It may be a summary page, a marketing email, or an unsupported statement format.';
-    }
-
-    return res.status(200).json(response);
+    const action = req.body?.action;
+    if (action === 'extract') return await handleExtract(req, res, apiKey);
+    if (action === 'insight') return await handleInsight(req, res, apiKey);
+    return res.status(400).json({
+      error: 'bad_action',
+      message: 'Unknown action. Expected "extract" or "insight".',
+    });
   } catch (err) {
     console.error('Handler error:', err);
     return res.status(500).json({
