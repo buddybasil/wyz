@@ -273,6 +273,7 @@ async function callClaude({prompt, userContent, apiKey, maxTokens, timeoutMs, at
 async function runChunksConcurrent(chunks, filename, apiKey) {
   const results = new Array(chunks.length);
   const errors = new Array(chunks.length).fill(null);
+  const rawSamples = new Array(chunks.length).fill(null);
   let idx = 0;
   async function worker() {
     while (idx < chunks.length) {
@@ -286,7 +287,15 @@ async function runChunksConcurrent(chunks, filename, apiKey) {
           maxTokens: MAX_TOKENS,
           timeoutMs: CLAUDE_TIMEOUT_MS,
         });
-        results[myIdx] = parseJsonArray(raw);
+        const parsed = parseJsonArray(raw);
+        results[myIdx] = parsed;
+        rawSamples[myIdx] = {
+          raw_length: raw.length,
+          raw_start: raw.slice(0, 200),
+          raw_end: raw.slice(-200),
+          parsed_count: parsed.length,
+        };
+        console.log(`Chunk ${myIdx + 1}/${chunks.length}: raw=${raw.length} chars, parsed=${parsed.length} txns. Start: ${raw.slice(0, 100).replace(/\n/g, ' ')}`);
       } catch (err) {
         console.error(`Chunk ${myIdx + 1} failed:`, err.message);
         errors[myIdx] = err.message;
@@ -296,7 +305,7 @@ async function runChunksConcurrent(chunks, filename, apiKey) {
   }
   const workerCount = Math.min(MAX_CONCURRENT, chunks.length);
   await Promise.all(Array.from({length: workerCount}, () => worker()));
-  return {results, errors};
+  return {results, errors, rawSamples};
 }
 
 // ══ HANDLER: extract action ══
@@ -331,7 +340,8 @@ async function handleExtract(req, res, apiKey) {
     truncated = true;
   }
   const chunks = chunkText(cleaned);
-  const {results, errors} = await runChunksConcurrent(chunks, filename, apiKey);
+  console.log(`Extract request: filename=${filename}, text_len=${(text||'').length}`);
+  const {results, errors, rawSamples} = await runChunksConcurrent(chunks, filename, apiKey);
   const chunksFailed = errors.filter(e => e).length;
   const chunksTotal = chunks.length;
   const chunksOk = chunksTotal - chunksFailed;
@@ -375,7 +385,9 @@ async function handleExtract(req, res, apiKey) {
       cleaned_chars: cleaned.length,
       chunks_processed: chunksTotal,
       sample_text: cleaned.slice(0, 200),
+      claude_samples: rawSamples,
     };
+    console.log('Zero txns returned. Raw samples:', JSON.stringify(rawSamples));
   }
   return res.status(200).json(response);
 }
