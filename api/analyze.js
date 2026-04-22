@@ -3,7 +3,7 @@
 // Requires env variable: ANTHROPIC_API_KEY
 
 const MODEL               = 'claude-haiku-4-5-20251001';
-const MAX_TOKENS          = 8000;
+const MAX_TOKENS          = 16000;  // Haiku supports up to 64k; 16k fits ~150+ txns
 const INSIGHT_MAX_TOKENS  = 400;
 const CHUNK_SIZE          = 45000;
 const MAX_TOTAL_CHARS     = 400000;
@@ -77,20 +77,44 @@ CRITICAL CLASSIFICATION RULES:
 7. **Salary** always cat="income", sub="direct", type="salary", freq="monthly"
 `.trim();
 
-const EXTRACT_PROMPT = `You are a financial transaction analyzer. You receive raw text from a bank/credit-card statement (any country/bank/currency) and return clean structured transactions.
+const EXTRACT_PROMPT = `You are a financial transaction analyzer. You receive raw text from a bank or credit-card statement (any country, any bank, any currency) and return clean structured transactions.
 
-TASK: Extract every real transaction. Ignore headers, balances, summaries, totals, interest-rate disclosures, T&Cs, cashback rollup rows, and all boilerplate.
+═══ THE CORE RULE (this is all that matters) ═══
 
-Each transaction:
+**A line is a transaction if — and only if — it has:**
+  (a) a DATE, AND
+  (b) a DEBIT or CREDIT AMOUNT greater than zero (not 0.00, not blank).
+
+**Capture every such line.** If in doubt, capture it — the user can delete it later. Do NOT filter for "real" vs "fee" vs "reversal" — any line with a date + non-zero amount is in scope.
+
+**Skip only these (they are NEVER transactions):**
+- Opening balance / Closing balance rows
+- Sub-totals, page totals, "Total debits", "Total credits"
+- Column headers (e.g. repeating "Posting Date / Description / Amount" rows)
+- T&Cs, disclaimers, footnotes, marketing text
+- Rows where BOTH debit and credit columns are 0.00 or blank
+
+**Important — capture these too (they ARE transactions by the core rule):**
+- Bank fees (FOREIGN TRANSACTION FEE, LATE PAYMENT FEE, OVERLIMIT FEE, ANNUAL FEE) → expenses/fees
+- Interest charges and interest earned
+- Government fees, traffic fines, RTA, SMARTDXB, TASJEEL → expenses/transport/gov_services
+- Insurance premiums of any kind
+- Credit card payments (both directions — bank→card debit AND card side credit) → loans
+- Inter-account transfers between the user's own accounts → transfer_in / transfer_out
+- Small amounts — any amount > 0 is captured
+
+═══ OUTPUT ═══
+
+For each transaction return this JSON object:
 {
   "date": "YYYY-MM-DD",
-  "merchant": cleaned description (strip ref numbers, card digits, tx IDs),
-  "amount": positive number (no currency symbol),
-  "currency": ISO code,
-  "direction": "CR" (in) or "DR" (out),
-  "cat": category,
+  "merchant": cleaned description (strip long ref numbers, card digits, tx IDs),
+  "amount": positive number (no currency symbol, must be > 0),
+  "currency": ISO code (AED, USD, INR, GBP, EUR, etc.),
+  "direction": "CR" for money IN, "DR" for money OUT,
+  "cat": category from taxonomy below,
   "sub": sub-category,
-  "type": type,
+  "type": specific type,
   "freq": frequency,
   "avoidable": boolean,
   "note": short context (<=40 chars) or null
@@ -98,7 +122,7 @@ Each transaction:
 
 ${TAXONOMY_PROMPT}
 
-GLOBAL MERCHANT GUIDE:
+GLOBAL MERCHANT GUIDE (use your knowledge for any merchant):
 - Starbucks/Costa/Tim Hortons → dining_out
 - Shell/BP/ADNOC/ENOC/EPPCO/EMARAT/Exxon → fuel
 - Netflix/Spotify/Disney+/Prime/Apple.com/iTunes → subscription
@@ -106,10 +130,10 @@ GLOBAL MERCHANT GUIDE:
 - Uber/Lyft/Ola/Careem → ride_hail
 - Talabat/Deliveroo/DoorDash/Swiggy/Zomato → food_delivery
 - Lulu/Carrefour/Spinneys/Waitrose/Tesco → supermarket
-- SELFDRIVE/GLOMO (car rental) → car_rental, avoidable=false
+- SELFDRIVE/GLOMO → car_rental, avoidable=false
 - TAMARA/TABBY (BNPL) → online_shopping
 
-OUTPUT: JSON array only. No preamble, no code fences. If none, return [].`;
+Return ONLY a JSON array of transactions. No preamble, no code fences, no commentary, no metadata wrapper. If you truly find zero transactions, return [].`;
 
 // ══ INSIGHT PROMPT — tuned for short, specific, behaviorally-useful observations ══
 const INSIGHT_PROMPT = `You are a thoughtful financial coach. Given a user's categorized spending summary, write ONE single observation that will stick with them psychologically before their next spending decision.
@@ -184,10 +208,42 @@ function parseJsonArray(raw) {
   if (!raw) return [];
   const clean = raw.replace(/```json|```/g, '').trim();
   const start = clean.indexOf('[');
+  if (start === -1) return [];
+  // Try a clean full-array parse first
   const end = clean.lastIndexOf(']');
-  if (start === -1 || end === -1) return [];
-  try { return JSON.parse(clean.slice(start, end + 1)); }
-  catch { return []; }
+  if (end !== -1) {
+    try { 
+      const parsed = JSON.parse(clean.slice(start, end + 1));
+      if (Array.isArray(parsed)) return parsed;
+    } catch { /* fall through to object-by-object recovery */ }
+  }
+  // Recovery mode: truncated response (max_tokens hit) or missing closing ].
+  // Extract each complete top-level object {...} by tracking brace depth through the string.
+  const body = clean.slice(start + 1);
+  const objects = [];
+  let depth = 0;
+  let objStart = -1;
+  let inString = false;
+  let escape = false;
+  for (let i = 0; i < body.length; i++) {
+    const c = body[i];
+    if (escape) { escape = false; continue; }
+    if (c === '\\') { escape = true; continue; }
+    if (c === '"') { inString = !inString; continue; }
+    if (inString) continue;
+    if (c === '{') {
+      if (depth === 0) objStart = i;
+      depth++;
+    } else if (c === '}') {
+      depth--;
+      if (depth === 0 && objStart !== -1) {
+        const objStr = body.slice(objStart, i + 1);
+        try { objects.push(JSON.parse(objStr)); } catch { /* skip malformed */ }
+        objStart = -1;
+      }
+    }
+  }
+  return objects;
 }
 
 function parseJsonObject(raw) {
@@ -288,14 +344,22 @@ async function runChunksConcurrent(chunks, filename, apiKey) {
           timeoutMs: CLAUDE_TIMEOUT_MS,
         });
         const parsed = parseJsonArray(raw);
+        // Detect likely truncation: long response that doesn't end with a closing ]
+        const trimmedEnd = raw.trimEnd().replace(/```$/, '').trimEnd();
+        const looksTruncated = raw.length > 12000 && !trimmedEnd.endsWith(']');
+        if (looksTruncated) {
+          errors[myIdx] = `truncated: response was ${raw.length} chars, cut off mid-output. Recovered ${parsed.length} complete transactions — consider splitting this file for full coverage.`;
+          console.warn(`Chunk ${myIdx + 1} likely truncated; recovered ${parsed.length} txns`);
+        }
         results[myIdx] = parsed;
         rawSamples[myIdx] = {
           raw_length: raw.length,
           raw_start: raw.slice(0, 200),
           raw_end: raw.slice(-200),
           parsed_count: parsed.length,
+          truncated: looksTruncated,
         };
-        console.log(`Chunk ${myIdx + 1}/${chunks.length}: raw=${raw.length} chars, parsed=${parsed.length} txns. Start: ${raw.slice(0, 100).replace(/\n/g, ' ')}`);
+        console.log(`Chunk ${myIdx + 1}/${chunks.length}: raw=${raw.length} chars, parsed=${parsed.length} txns${looksTruncated ? ' (TRUNCATED)' : ''}. Start: ${raw.slice(0, 100).replace(/\n/g, ' ')}`);
       } catch (err) {
         console.error(`Chunk ${myIdx + 1} failed:`, err.message);
         errors[myIdx] = err.message;
@@ -354,7 +418,7 @@ async function handleExtract(req, res, apiKey) {
       chunks_total: chunksTotal, chunks_failed: chunksFailed,
     });
   }
-  const all = results.flat().map(normalizeTxn).filter(t => t.date && t.amount > 0);
+  const all = results.flat().map(normalizeTxn).filter(t => t.date && t.amount >= 0.01);
   const seen = new Map();
   const unique = [];
   for (const t of all) {
@@ -365,6 +429,7 @@ async function handleExtract(req, res, apiKey) {
   const response = {
     transactions: unique, count: unique.length, filename: filename || null,
     chunks_total: chunksTotal, chunks_ok: chunksOk, chunks_failed: chunksFailed,
+    text_chars: cleaned.length,
   };
   if (chunksFailed > 0) {
     // Surface the actual underlying error messages so users/devs can diagnose
