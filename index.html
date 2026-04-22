@@ -211,8 +211,8 @@ html,body{height:100%;font-family:'DM Sans',sans-serif;background:var(--bg);colo
 .ir.bulk-sel{background:var(--Gl);border-radius:6px;padding:8px 8px 8px 10px;margin:0 -8px;border-bottom-color:transparent}
 
 /* Sticky bulk action bar (bottom of screen when rows selected) */
-.bulk-bar{position:fixed;left:50%;bottom:20px;transform:translateX(-50%) translateY(120%);background:var(--t);color:#fff;border-radius:999px;padding:10px 10px 10px 20px;display:flex;align-items:center;gap:8px;box-shadow:0 8px 24px rgba(0,0,0,.25);font-size:13px;font-weight:500;transition:transform .2s cubic-bezier(.4,0,.2,1);z-index:1000;max-width:calc(100vw - 32px)}
-.bulk-bar.on{transform:translateX(-50%) translateY(0)}
+.bulk-bar{position:fixed;left:50%;bottom:20px;transform:translateX(-50%) translateY(200%);background:var(--t);color:#fff;border-radius:999px;padding:10px 10px 10px 20px;display:flex;align-items:center;gap:8px;box-shadow:0 8px 24px rgba(0,0,0,.25);font-size:13px;font-weight:500;transition:transform .2s cubic-bezier(.4,0,.2,1),opacity .15s;z-index:1000;max-width:calc(100vw - 32px);opacity:0;visibility:hidden;pointer-events:none}
+.bulk-bar.on{transform:translateX(-50%) translateY(0);opacity:1;visibility:visible;pointer-events:auto}
 .bba{background:rgba(255,255,255,.15);color:#fff;border:none;border-radius:999px;padding:7px 14px;font-size:12px;font-weight:500;cursor:pointer;font-family:inherit;transition:background .1s}
 .bba:hover{background:rgba(255,255,255,.25)}
 .bba-del{background:var(--R)}
@@ -221,8 +221,8 @@ html,body{height:100%;font-family:'DM Sans',sans-serif;background:var(--bg);colo
 .bba-ghost:hover{background:rgba(255,255,255,.1);color:#fff}
 
 /* Recycle toast (brief notification after delete) */
-.recycle-toast{position:fixed;left:50%;bottom:20px;transform:translateX(-50%) translateY(120%);background:var(--t);color:#fff;border-radius:999px;padding:10px 18px;display:flex;align-items:center;gap:10px;box-shadow:0 8px 24px rgba(0,0,0,.25);font-size:12px;transition:transform .2s cubic-bezier(.4,0,.2,1);z-index:999;max-width:calc(100vw - 32px)}
-.recycle-toast.on{transform:translateX(-50%) translateY(0)}
+.recycle-toast{position:fixed;left:50%;bottom:20px;transform:translateX(-50%) translateY(200%);background:var(--t);color:#fff;border-radius:999px;padding:10px 18px;display:flex;align-items:center;gap:10px;box-shadow:0 8px 24px rgba(0,0,0,.25);font-size:12px;transition:transform .2s cubic-bezier(.4,0,.2,1),opacity .15s;z-index:999;max-width:calc(100vw - 32px);opacity:0;visibility:hidden;pointer-events:none}
+.recycle-toast.on{transform:translateX(-50%) translateY(0);opacity:1;visibility:visible;pointer-events:auto}
 .recycle-toast-ic{font-size:14px;opacity:.7}
 /* Recycle bin rows */
 .recycle-row{display:flex;align-items:center;gap:10px;padding:9px 12px;border-bottom:1px solid var(--b);background:var(--s)}
@@ -246,9 +246,15 @@ html,body{height:100%;font-family:'DM Sans',sans-serif;background:var(--bg);colo
 /* Paired rows dimmed to show they're netted to zero */
 .ir.xp-row{opacity:.55}
 /* Editable (double-tap-to-rename) hint on bucket labels */
-.editable-lbl{cursor:text;position:relative;transition:color .1s}
+.editable-lbl{cursor:pointer;position:relative;transition:color .1s}
 .editable-lbl:hover{color:var(--G) !important}
 .editable-input{font:inherit;border:1.5px solid var(--G);border-radius:4px;padding:1px 5px;background:#fff;color:var(--t);outline:none;min-width:70px;max-width:200px;width:auto}
+/* "+ Add sub" pill at end of each sub-tab strip */
+.stab-add{border:1px dashed var(--bm);color:var(--t3);font-weight:500;font-style:italic}
+.stab-add:hover{color:var(--G);border-color:var(--G);background:var(--Gl)}
+/* "+ Add new sub" row at end of each group in the category picker sheet */
+.cat-opt-add{display:flex;align-items:center;gap:6px;padding:9px 12px;border-radius:var(--rs);cursor:pointer;font-size:12px;font-weight:500;color:var(--t3);border:1px dashed var(--bm);font-style:italic;margin-bottom:5px;transition:all .15s}
+.cat-opt-add:hover{background:var(--Gl);color:var(--G);border-color:var(--G);font-style:normal}
 </style>
 </head>
 <body>
@@ -335,7 +341,6 @@ html,body{height:100%;font-family:'DM Sans',sans-serif;background:var(--bg);colo
       <div class="dh-period" id="dpd">—</div>
       <div class="dh-actions">
         <button class="nb" id="btn-select" onclick="toggleBulkMode()"><svg width="10" height="10" viewBox="0 0 24 24" fill="none"><path d="M9 11l3 3L22 4" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg><span id="btn-select-lbl">Select</span></button>
-        <button class="nb" onclick="show('sr')"><svg width="10" height="10" viewBox="0 0 24 24" fill="none"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>Edit</button>
         <button class="nb" onclick="show('su')"><svg width="10" height="10" viewBox="0 0 24 24" fill="none"><path d="M3 12a9 9 0 109-9M3 3v6h6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>New</button>
       </div>
     </div>
@@ -401,6 +406,8 @@ const CATS = {
 // ═══════════════════════════════════════════════════════════════════════════
 // Strictly 2 levels: main bucket → sub bucket. No deeper nesting.
 // Persisted in localStorage so renames survive reloads within the same browser.
+// Users can also ADD new sub-buckets via the "+ Add" pill at the end of each
+// sub-tab strip. New sub keys are slugified from the display name.
 const DEFAULT_LABELS = {
   main: {
     income:              'Income',
@@ -421,6 +428,13 @@ const DEFAULT_LABELS = {
     'loans:main':                 'Loan repayments',
   },
 };
+// Default subKeys per main bucket — mutable copies go into bucketLabels.subKeys
+const DEFAULT_SUBKEYS = {
+  income: ['direct','indirect'],
+  expenses: ['food','shelter','transport','fees','misc'],
+  savings_investments: ['liquid','committed'],
+  loans: ['main'],
+};
 // Short labels used on the month-tab strip (space-constrained)
 const DEFAULT_SHORT = {
   income: 'Income', expenses: 'Expenses',
@@ -433,14 +447,25 @@ function loadLabels(){
     const s = localStorage.getItem('wys_bucket_labels');
     if(s){
       const parsed = JSON.parse(s);
+      // Deep-merge subKeys so new defaults get added to old saves
+      const mergedSubKeys = {};
+      for(const main of Object.keys(DEFAULT_SUBKEYS)){
+        mergedSubKeys[main] = (parsed.subKeys && parsed.subKeys[main]) || [...DEFAULT_SUBKEYS[main]];
+      }
       return {
-        main: {...DEFAULT_LABELS.main, ...(parsed.main||{})},
-        sub:  {...DEFAULT_LABELS.sub,  ...(parsed.sub||{})},
-        short:{...DEFAULT_SHORT,       ...(parsed.short||{})},
+        main:    {...DEFAULT_LABELS.main, ...(parsed.main||{})},
+        sub:     {...DEFAULT_LABELS.sub,  ...(parsed.sub||{})},
+        short:   {...DEFAULT_SHORT,       ...(parsed.short||{})},
+        subKeys: mergedSubKeys,
       };
     }
   }catch(_){}
-  return {main:{...DEFAULT_LABELS.main}, sub:{...DEFAULT_LABELS.sub}, short:{...DEFAULT_SHORT}};
+  return {
+    main:{...DEFAULT_LABELS.main},
+    sub:{...DEFAULT_LABELS.sub},
+    short:{...DEFAULT_SHORT},
+    subKeys: Object.fromEntries(Object.entries(DEFAULT_SUBKEYS).map(([k,v])=>[k,[...v]])),
+  };
 }
 function saveLabels(){
   try{ localStorage.setItem('wys_bucket_labels', JSON.stringify(bucketLabels)); }catch(_){}
@@ -449,12 +474,13 @@ function saveLabels(){
 function mainLbl(cat){ return bucketLabels.main[cat] || cat; }
 function shortLbl(cat){ return bucketLabels.short[cat] || mainLbl(cat); }
 function subLbl(cat, sub){ return bucketLabels.sub[cat+':'+sub] || sub; }
+function getSubKeys(cat){ return bucketLabels.subKeys[cat] || DEFAULT_SUBKEYS[cat] || []; }
 
 function renameMainBucket(cat, newLbl){
   newLbl = (newLbl||'').trim();
   if(!newLbl) return;
   bucketLabels.main[cat] = newLbl;
-  // Short label: use the first word (cap 10 chars) unless the user customised it directly
+  // Short label: use the full name if ≤10 chars, else first word
   bucketLabels.short[cat] = newLbl.length <= 10 ? newLbl : newLbl.split(/\s+/)[0].slice(0,10);
   saveLabels();
   rerenderAll();
@@ -466,17 +492,44 @@ function renameSubBucket(cat, sub, newLbl){
   saveLabels();
   rerenderAll();
 }
+// Add a brand-new sub-bucket under the given main category. `displayName` is what
+// the user typed; we slugify to produce the internal key. Nothing is moved into
+// the new sub yet — users can reassign existing txns via the category picker.
+function addSubBucket(cat, displayName){
+  displayName = (displayName||'').trim();
+  if(!displayName) return null;
+  // Slugify: lowercase, non-alnum → underscore, strip leading/trailing, cap 20 chars
+  let key = displayName.toLowerCase().replace(/[^a-z0-9]+/g,'_').replace(/^_+|_+$/g,'').slice(0,20);
+  if(!key) key = 'custom_' + Date.now().toString(36).slice(-5);
+  // Ensure unique within this category
+  const existing = getSubKeys(cat);
+  let uniqKey = key, n = 1;
+  while(existing.includes(uniqKey)){ uniqKey = key + '_' + (++n); }
+  // Mutate state + persist
+  if(!bucketLabels.subKeys[cat]) bucketLabels.subKeys[cat] = [...DEFAULT_SUBKEYS[cat]];
+  bucketLabels.subKeys[cat].push(uniqKey);
+  bucketLabels.sub[cat + ':' + uniqKey] = displayName;
+  saveLabels();
+  // Switch the dashboard to the new sub-tab if we're on this main tab
+  cS[cat] = uniqKey;
+  rerenderAll();
+  return uniqKey;
+}
 function rerenderAll(){
   if(document.getElementById('sd').classList.contains('on')){
-    refreshDashHeader(); renderDash();
+    buildSubTabs();      // rebuild sub-tab strips (picks up new subs + renames)
+    refreshDashHeader(); // refresh main-tab labels/counts
+    renderDash();        // re-render current tab content
+    // Re-bind main-tab label editors (innerHTML changes may have cleared them)
+    document.querySelectorAll('.mlbl[data-lblkey]').forEach(el=>{
+      const key = el.dataset.lblkey;
+      if(!key || key === '__all__') return;
+      const [, cat] = key.split(':');
+      makeEditable(el, ()=>shortLbl(cat), (v)=>renameMainBucket(cat, v));
+    });
   }
   if(document.getElementById('sr').classList.contains('on')){
     renderReview();
-    // Update filter pill labels
-    document.querySelectorAll('.rfilt').forEach(el=>{
-      const f = el.getAttribute('data-f');
-      if(f && bucketLabels.main[f]) el.dataset.baseLbl = mainLbl(f);
-    });
   }
 }
 
@@ -939,6 +992,7 @@ function bulkMoveStart(){
   editingIdx='__bulk__';
   document.getElementById('sheet-opts').innerHTML=buildCatOptionsHtml(null,null);
   document.getElementById('overlay').classList.add('on');
+  bindSheetEditables();
 }
 function bulkAssign(cat,sub){
   const ids=[...bulkSelected];
@@ -956,39 +1010,81 @@ function bulkAssign(cat,sub){
 }
 
 // ══ SHEET ══
-// Builds the category-picker HTML. Group labels (main buckets) and option labels
-// (sub buckets) are both double-tap-editable from the sheet — the rename applies
-// everywhere in the app once committed.
+// Builds the category-picker HTML. Group labels (main buckets) are double-tap
+// editable. Sub-bucket labels inside the sheet are NOT directly editable here
+// (tapping a row assigns the txn), but can be renamed from the sub-tab strip
+// on the dashboard. At the end of each group we show a "+ Add new" row that
+// creates a new sub AND assigns the current txn to it.
 function buildCatOptionsHtml(currentCat,currentSub){
   const cur=currentCat&&currentSub?`${currentCat}:${currentSub}`:null;
   const handler=editingIdx==='__bulk__'?'bulkAssign':'assignCat';
   let html='';
-  for(const [cat,info] of Object.entries(CATS)){
+  for(const cat of Object.keys(CATS)){
     html+=`<div class="cat-group">
       <div class="cat-group-label editable-lbl" data-sheetlbl="main:${cat}">${mainLbl(cat)}</div>`;
-    for(const sub of info.subKeys){
+    for(const sub of getSubKeys(cat)){
       const val=`${cat}:${sub}`, sel=cur&&val===cur?'sel':'';
       html+=`<div class="cat-opt ${sel}" data-cat="${cat}" data-sub="${sub}" onclick="${handler}('${cat}','${sub}')">
-        <span class="cat-opt-lbl editable-lbl" data-sheetlbl="sub:${cat}:${sub}" onclick="event.stopPropagation()">${subLbl(cat,sub)}</span>
+        <span>${subLbl(cat,sub)}</span>
         <div class="cat-check"></div>
       </div>`;
     }
+    // "+ Add new" inline row — creates a sub AND assigns the current txn to it
+    html+=`<div class="cat-opt-add" data-addmain="${cat}" onclick="startAddSubInSheet('${cat}',this,event)">+ Add new sub under ${mainLbl(cat)}</div>`;
     html+='</div>';
   }
   return html;
 }
 function bindSheetEditables(){
-  // Wire up double-tap editing on sheet labels
+  // Only main group labels are editable from within the sheet
   document.querySelectorAll('#sheet-opts .editable-lbl[data-sheetlbl]').forEach(el=>{
     const key = el.getAttribute('data-sheetlbl');
     if(key.startsWith('main:')){
       const cat = key.slice(5);
       makeEditable(el, ()=>mainLbl(cat), (v)=>renameMainBucket(cat, v));
-    } else if(key.startsWith('sub:')){
-      const [, cat, sub] = key.split(':');
-      makeEditable(el, ()=>subLbl(cat, sub), (v)=>renameSubBucket(cat, sub, v));
     }
   });
+}
+// When the user taps "+ Add new" inside the sheet: replace the row with an
+// input; on commit, create the sub AND immediately assign the current txn to
+// it (this is the whole reason they opened the sheet). Skip assignment in bulk
+// mode by routing through bulkAssign instead.
+function startAddSubInSheet(main, el, ev){
+  if(ev){ ev.stopPropagation(); }
+  if(el.querySelector('input')) return;
+  const origHtml = el.innerHTML;
+  const input = document.createElement('input');
+  input.type='text';
+  input.placeholder=`New sub under ${mainLbl(main)}`;
+  input.className='editable-input';
+  input.setAttribute('maxlength','30');
+  input.style.width='100%';
+  input.style.minWidth='160px';
+  el.innerHTML='';
+  el.appendChild(input);
+  input.focus();
+  let done=false;
+  const finish=(save)=>{
+    if(done) return; done=true;
+    const v=input.value.trim();
+    if(save && v){
+      const newKey = addSubBucket(main, v);
+      if(newKey){
+        // Route to the right handler based on whether this is a single- or bulk-move
+        if(editingIdx==='__bulk__') bulkAssign(main, newKey);
+        else assignCat(main, newKey);
+      }
+    } else {
+      el.innerHTML=origHtml;
+    }
+  };
+  input.addEventListener('blur', ()=>finish(true));
+  input.addEventListener('keydown', (kev)=>{
+    kev.stopPropagation();
+    if(kev.key==='Enter'){ kev.preventDefault(); finish(true); }
+    else if(kev.key==='Escape'){ kev.preventDefault(); finish(false); }
+  });
+  input.addEventListener('click', e=>e.stopPropagation());
 }
 function openSheet(id){
   if(bulkMode){ bulkToggleRow(id); return; }
@@ -1018,29 +1114,68 @@ function closeSheet(e){
   editingIdx=null;
 }
 
-// ══ SUB-TAB BUILDERS — dynamic so renames reflect immediately ══
+// ══ SUB-TAB BUILDERS — dynamic so renames and new subs reflect immediately ══
+// Single-click anywhere on a .stab switches to that sub-tab. Double-click the
+// label specifically puts it into inline edit mode (the tab switches first, then
+// the input appears — that's expected because editing the label you're viewing
+// is the natural flow).
 function buildSubTabs(){
-  const build = (main, subs) => subs.map((sub, i) =>
-    `<div class="stab ${i===0&&cS[main]===sub?'on':(cS[main]===sub?'on':'')}" data-sub="${sub}" onclick="sS('${main}','${sub}',this)">
-       <span class="editable-lbl" data-sublbl="${main}:${sub}" onclick="event.stopPropagation()">${subLbl(main,sub)}</span>
-     </div>`
-  ).join('');
-  document.getElementById('sb-income').innerHTML = build('income', CATS.income.subKeys);
-  document.getElementById('sb-expenses').innerHTML = build('expenses', CATS.expenses.subKeys);
-  document.getElementById('sb-savings_investments').innerHTML = build('savings_investments', CATS.savings_investments.subKeys);
-  document.getElementById('sb-loans').innerHTML = build('loans', CATS.loans.subKeys);
-  // Re-mark the currently-selected sub-tab
-  ['income','expenses','savings_investments','loans'].forEach(main=>{
-    const active = cS[main];
-    document.querySelectorAll(`#sb-${main} .stab`).forEach(el=>{
-      el.classList.toggle('on', el.dataset.sub === active);
-    });
-  });
-  // Bind double-tap rename on each sub-tab label
+  const build = (main) => {
+    const subs = getSubKeys(main);
+    const pills = subs.map((sub) =>
+      `<div class="stab ${cS[main]===sub?'on':''}" data-sub="${sub}" onclick="sS('${main}','${sub}',this)">
+         <span class="editable-lbl" data-sublbl="${main}:${sub}">${subLbl(main,sub)}</span>
+       </div>`
+    ).join('');
+    // Add pill at end: "+ Add" → inline input → creates new sub
+    const addPill = `<div class="stab stab-add" data-addmain="${main}" onclick="startAddSub('${main}',this,event)">+ Add</div>`;
+    return pills + addPill;
+  };
+  document.getElementById('sb-income').innerHTML = build('income');
+  document.getElementById('sb-expenses').innerHTML = build('expenses');
+  document.getElementById('sb-savings_investments').innerHTML = build('savings_investments');
+  document.getElementById('sb-loans').innerHTML = build('loans');
+  // Bind double-tap rename on each sub-tab label. makeEditable uses dblclick +
+  // touchend-double-tap; single taps fall through to the parent .stab's onclick.
   document.querySelectorAll('.stab .editable-lbl[data-sublbl]').forEach(el=>{
     const [cat, sub] = el.dataset.sublbl.split(':');
     makeEditable(el, ()=>subLbl(cat, sub), (v)=>renameSubBucket(cat, sub, v));
   });
+}
+
+// "+ Add sub" inline editor — replaces the pill with an input, commits on
+// blur/Enter, cancels on Escape. Triggered from the sub-tab strip AND from
+// inside the category-picker sheet.
+function startAddSub(main, el, ev){
+  if(ev){ ev.stopPropagation(); }
+  if(el.querySelector('input')) return;
+  const origHtml = el.innerHTML;
+  const input = document.createElement('input');
+  input.type='text';
+  input.placeholder='New sub name';
+  input.className='editable-input';
+  input.setAttribute('maxlength','30');
+  input.style.minWidth='110px';
+  el.innerHTML='';
+  el.appendChild(input);
+  input.focus();
+  let done=false;
+  const finish=(save)=>{
+    if(done) return; done=true;
+    const v=input.value.trim();
+    if(save && v){
+      addSubBucket(main, v);
+    } else {
+      el.innerHTML=origHtml;
+    }
+  };
+  input.addEventListener('blur', ()=>finish(true));
+  input.addEventListener('keydown', (kev)=>{
+    kev.stopPropagation();
+    if(kev.key==='Enter'){ kev.preventDefault(); finish(true); }
+    else if(kev.key==='Escape'){ kev.preventDefault(); finish(false); }
+  });
+  input.addEventListener('click', e=>e.stopPropagation());
 }
 
 // ══ BUILD DASHBOARD ══
