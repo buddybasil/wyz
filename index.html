@@ -134,11 +134,12 @@ html,body{height:100%;font-family:'DM Sans',sans-serif;background:var(--bg);colo
 /* ── DASHBOARD ── */
 #sd{background:var(--bg)}
 .dh{background:var(--s);border-bottom:1px solid var(--b);position:sticky;top:0;z-index:10}
-.dtr{display:flex;align-items:center;justify-content:space-between;padding:12px 17px 10px}
-.du{display:flex;align-items:center;gap:8px}
-.dav{width:32px;height:32px;border-radius:50%;background:var(--Gb);color:var(--G);font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center}
-.dnm{font-size:13px;font-weight:600}.dpd{font-size:10px;color:var(--t2)}
-.sppill{display:flex;align-items:center;gap:4px;background:var(--Gb);color:var(--G);font-size:11px;font-weight:700;padding:4px 9px;border-radius:20px}
+
+/* NEW: slim top strip (replaces the old avatar+name+pill+buttons row) */
+.dh-top{display:flex;align-items:center;justify-content:space-between;padding:10px 14px 6px;gap:8px;min-height:34px}
+.dh-period{font-size:11px;color:var(--t3);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dh-actions{display:flex;align-items:center;gap:6px;flex-shrink:0}
+
 .nb{background:none;border:1px solid var(--bm);border-radius:6px;padding:4px 9px;font-family:'DM Sans',sans-serif;font-size:11px;font-weight:500;color:var(--t2);cursor:pointer;display:flex;align-items:center;gap:3px}
 .nb:hover{background:var(--bg)}
 .mts{display:flex;overflow-x:auto;scrollbar-width:none}
@@ -170,7 +171,6 @@ html,body{height:100%;font-family:'DM Sans',sans-serif;background:var(--bg);colo
 .ip{font-size:10px;color:var(--t3);margin-top:2px}
 .cG{color:var(--G)}.cR{color:var(--R)}.cB{color:var(--B)}.cA{color:var(--A)}.cD{color:var(--t2);font-weight:400}
 .ftg{display:inline-block;font-size:9px;font-weight:600;padding:2px 6px;border-radius:10px;letter-spacing:.02em;vertical-align:middle;margin-left:5px}
-.fmo{background:var(--Gb);color:var(--G)}.fqt{background:var(--Bb);color:var(--B)}.fan{background:var(--Ab);color:var(--A)}.fah{background:var(--bg);color:var(--t3);border:1px solid var(--bm)}
 .ins{border-radius:var(--r);padding:11px 13px;font-size:12px;line-height:1.7;margin-top:11px}
 .iG{background:var(--Gl);border:1px solid rgba(26,122,74,.2);color:#144d31}
 .iR{background:var(--Rb);border:1px solid rgba(192,57,43,.2);color:#7a1c13}
@@ -241,6 +241,14 @@ html,body{height:100%;font-family:'DM Sans',sans-serif;background:var(--bg);colo
 .mt-cell.zero .mt-cell-v{color:var(--t3);font-weight:400}
 /* Self-transfer flag badge on rows */
 .stf-badge{display:inline-flex;align-items:center;font-size:9px;font-weight:600;background:var(--Bb);color:var(--B);border:1px solid rgba(26,78,138,.15);border-radius:10px;padding:1px 6px;margin-left:6px;cursor:help;white-space:nowrap}
+/* Cross-statement paired badge */
+.xp-badge{display:inline-flex;align-items:center;font-size:9px;font-weight:600;background:#ede8fa;color:#4a2d8c;border:1px solid rgba(74,45,140,.2);border-radius:10px;padding:1px 6px;margin-left:6px;cursor:help;white-space:nowrap}
+/* Paired rows dimmed to show they're netted to zero */
+.ir.xp-row{opacity:.55}
+/* Editable (double-tap-to-rename) hint on bucket labels */
+.editable-lbl{cursor:text;position:relative;transition:color .1s}
+.editable-lbl:hover{color:var(--G) !important}
+.editable-input{font:inherit;border:1.5px solid var(--G);border-radius:4px;padding:1px 5px;background:#fff;color:var(--t);outline:none;min-width:70px;max-width:200px;width:auto}
 </style>
 </head>
 <body>
@@ -271,7 +279,6 @@ html,body{height:100%;font-family:'DM Sans',sans-serif;background:var(--bg);colo
     </div>
     <div id="flist" class="flist"></div>
     <button class="btn btn-p" id="abtn" onclick="startAnalysis()" style="display:none">Analyse <span id="fcnt"></span></button>
-    
   </div>
 </div>
 
@@ -294,7 +301,7 @@ html,body{height:100%;font-family:'DM Sans',sans-serif;background:var(--bg);colo
 <div id="sr" class="screen">
   <div class="rev-head">
     <div class="rev-title">Review transactions</div>
-    <div class="rev-sub" id="rev-sub">Tap a category to reassign · trash to remove</div>
+    <div class="rev-sub" id="rev-sub">Tap a category to reassign · × to remove · double-tap any bucket name above to rename</div>
   </div>
   <div class="rev-filters" id="rev-filters">
     <div class="rfilt on" data-f="all" onclick="filterReview('all',this)">All</div>
@@ -323,33 +330,30 @@ html,body{height:100%;font-family:'DM Sans',sans-serif;background:var(--bg);colo
 <!-- ── DASHBOARD ── -->
 <div id="sd" class="screen">
   <div class="dh">
-    <div class="dtr">
-      <div class="du">
-        <div class="dav" id="dav">—</div>
-        <div><div class="dnm" id="dnm">—</div><div class="dpd" id="dpd">—</div></div>
-      </div>
-      <div style="display:flex;align-items:center;gap:6px">
-        <div class="sppill"><svg width="9" height="9" viewBox="0 0 24 24" fill="none"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/></svg><span id="dsurp">—</span></div>
+    <!-- Slim top strip: period text + Select/Edit/New. Replaces the old avatar/name/pill row. -->
+    <div class="dh-top">
+      <div class="dh-period" id="dpd">—</div>
+      <div class="dh-actions">
         <button class="nb" id="btn-select" onclick="toggleBulkMode()"><svg width="10" height="10" viewBox="0 0 24 24" fill="none"><path d="M9 11l3 3L22 4" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg><span id="btn-select-lbl">Select</span></button>
         <button class="nb" onclick="show('sr')"><svg width="10" height="10" viewBox="0 0 24 24" fill="none"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>Edit</button>
         <button class="nb" onclick="show('su')"><svg width="10" height="10" viewBox="0 0 24 24" fill="none"><path d="M3 12a9 9 0 109-9M3 3v6h6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>New</button>
       </div>
     </div>
-    <div class="mts">
-      <div class="mt on" onclick="sM('all',this)"><div class="mv" id="mv-a">—</div><div class="mlbl" id="mlbl-a">All</div></div>
-      <div class="mt" onclick="sM('income',this)"><div class="mv" id="mv-i">—</div><div class="mlbl" id="mlbl-i">Income</div></div>
-      <div class="mt" onclick="sM('expenses',this)"><div class="mv" id="mv-e">—</div><div class="mlbl" id="mlbl-e">Expenses</div></div>
-      <div class="mt" onclick="sM('savings_investments',this)"><div class="mv" id="mv-v">—</div><div class="mlbl" id="mlbl-v">Savings</div></div>
-      <div class="mt" onclick="sM('loans',this)"><div class="mv" id="mv-l">—</div><div class="mlbl" id="mlbl-l">Loans</div></div>
-      <div class="mt" onclick="sM('pl',this)"><div class="mv">P&amp;L</div><div class="mlbl">Summary</div></div>
-      <div class="mt" id="mt-recycle" onclick="sM('recycle',this)" style="display:none"><div class="mv" id="mv-r">—</div><div class="mlbl">Recycle</div></div>
+    <div class="mts" id="mts">
+      <div class="mt on" data-m="all" onclick="sM('all',this)"><div class="mv" id="mv-a">—</div><div class="mlbl" id="mlbl-a" data-lblkey="__all__">All</div></div>
+      <div class="mt" data-m="income" onclick="sM('income',this)"><div class="mv" id="mv-i">—</div><div class="mlbl" id="mlbl-i" data-lblkey="main:income">Income</div></div>
+      <div class="mt" data-m="expenses" onclick="sM('expenses',this)"><div class="mv" id="mv-e">—</div><div class="mlbl" id="mlbl-e" data-lblkey="main:expenses">Expenses</div></div>
+      <div class="mt" data-m="savings_investments" onclick="sM('savings_investments',this)"><div class="mv" id="mv-v">—</div><div class="mlbl" id="mlbl-v" data-lblkey="main:savings_investments">Savings</div></div>
+      <div class="mt" data-m="loans" onclick="sM('loans',this)"><div class="mv" id="mv-l">—</div><div class="mlbl" id="mlbl-l" data-lblkey="main:loans">Loans</div></div>
+      <div class="mt" data-m="pl" onclick="sM('pl',this)"><div class="mv">P&amp;L</div><div class="mlbl">Summary</div></div>
+      <div class="mt" id="mt-recycle" data-m="recycle" onclick="sM('recycle',this)" style="display:none"><div class="mv" id="mv-r">—</div><div class="mlbl">Recycle</div></div>
     </div>
   </div>
   <div id="sb-all" class="sb" style="display:none"><div class="stab on" onclick="sS('all','list',this)">All transactions</div></div>
-  <div id="sb-income" class="sb" style="display:none"><div class="stab on" onclick="sS('income','direct',this)">Direct</div><div class="stab" onclick="sS('income','indirect',this)">Indirect</div></div>
-  <div id="sb-expenses" class="sb" style="display:none"><div class="stab on" onclick="sS('expenses','food',this)">Food</div><div class="stab" onclick="sS('expenses','shelter',this)">Shelter</div><div class="stab" onclick="sS('expenses','fees',this)">Fees</div><div class="stab" onclick="sS('expenses','transport',this)">Transport</div><div class="stab" onclick="sS('expenses','misc',this)">Misc</div></div>
-  <div id="sb-savings_investments" class="sb" style="display:none"><div class="stab on" onclick="sS('savings_investments','liquid',this)">Liquid / savings</div><div class="stab" onclick="sS('savings_investments','committed',this)">Committed / growth</div></div>
-  <div id="sb-loans" class="sb" style="display:none"><div class="stab on" onclick="sS('loans','main',this)">Both loans</div></div>
+  <div id="sb-income" class="sb" style="display:none"></div>
+  <div id="sb-expenses" class="sb" style="display:none"></div>
+  <div id="sb-savings_investments" class="sb" style="display:none"></div>
+  <div id="sb-loans" class="sb" style="display:none"></div>
   <div id="sb-pl" class="sb" style="display:none"><div class="stab on" onclick="sS('pl','monthly',this)">Monthly</div><div class="stab" onclick="sS('pl','avg',this)">Averages</div></div>
   <div id="sb-recycle" class="sb" style="display:none"><div class="stab on" onclick="sS('recycle','bin',this)">Deleted transactions</div></div>
   <div class="db" id="db"></div>
@@ -375,61 +379,178 @@ const WORKER_URL = '/api/analyze';
 let files=[], allTxns=[], plData=null;
 let cM='all', cS={all:'list',income:'direct',expenses:'food',savings_investments:'liquid',loans:'main',pl:'monthly',recycle:'bin'};
 let activeFilter='all', editingIdx=null;
-let fileWarnings=[]; // persistent: {name, reason, detail, count}
-let fileStats=[]; // persistent: {name, extracted, estimated, textChars, source} per successfully-processed file
-let insightData=null; // {headline, detail, tone} — null until loaded
-// Coverage: Claude's self-reported count of transaction-like lines vs what we extracted
-let linesDetected=null; // total Claude identified across all chunks
-// Recycle bin state: replaces undo. Delete moves to recycle; user restores from Recycle tab.
+let fileWarnings=[];
+let fileStats=[];
+let insightData=null;
+let linesDetected=null;
+let xPairCount=0; // cross-statement pairs found during extraction
 let toastTimer=null;
-// Bulk-select state
 let bulkMode=false;
-let bulkSelected=new Set(); // _id's of selected txns
+let bulkSelected=new Set();
 
-// ══ CATEGORY CONFIG ══
+// ══ CATEGORY CONFIG (colour + structure only — labels live in bucketLabels) ══
 const CATS = {
-  income:              { label:'Income',              color:'cat-income',      subs:{ direct:'Direct income', indirect:'Indirect / other' } },
-  expenses:            { label:'Expenses',            color:'cat-expenses',    subs:{ food:'Food & dining', shelter:'Shelter / rent', fees:'Fees & education', transport:'Transport', misc:'Miscellaneous' } },
-  savings_investments: { label:'Savings & Investments', color:'cat-investments', subs:{ liquid:'Liquid / savings', committed:'Committed / growth' } },
-  loans:               { label:'Loans',               color:'cat-loans',       subs:{ main:'Loan repayments' } },
+  income:              { color:'cat-income',      subKeys:['direct','indirect'] },
+  expenses:            { color:'cat-expenses',    subKeys:['food','shelter','transport','fees','misc'] },
+  savings_investments: { color:'cat-investments', subKeys:['liquid','committed'] },
+  loans:               { color:'cat-loans',       subKeys:['main'] },
 };
-// Migrate any incoming "investments" tagged txns from older API responses
-function migrateCat(t){ if(t.cat==='investments'){ t.cat='savings_investments'; if(!t.sub||t.sub==='all') t.sub='committed'; } return t; }
 
-// ══ BUILT-IN DEMO DATA ══
-// (same DEMO object as before — truncated here for brevity; runtime uses pre-categorised transactions)
+// ═══════════════════════════════════════════════════════════════════════════
+// BUCKET LABELS — user-renameable (double-tap any label to edit inline)
+// ═══════════════════════════════════════════════════════════════════════════
+// Strictly 2 levels: main bucket → sub bucket. No deeper nesting.
+// Persisted in localStorage so renames survive reloads within the same browser.
+const DEFAULT_LABELS = {
+  main: {
+    income:              'Income',
+    expenses:            'Expenses',
+    savings_investments: 'Savings & Investments',
+    loans:               'Loans',
+  },
+  sub: {
+    'income:direct':              'Direct income',
+    'income:indirect':            'Indirect / other',
+    'expenses:food':              'Food & dining',
+    'expenses:shelter':           'Shelter / rent',
+    'expenses:fees':              'Fees & education',
+    'expenses:transport':         'Transport',
+    'expenses:misc':              'Miscellaneous',
+    'savings_investments:liquid': 'Liquid / savings',
+    'savings_investments:committed': 'Committed / growth',
+    'loans:main':                 'Loan repayments',
+  },
+};
+// Short labels used on the month-tab strip (space-constrained)
+const DEFAULT_SHORT = {
+  income: 'Income', expenses: 'Expenses',
+  savings_investments: 'Savings', loans: 'Loans',
+};
+
+let bucketLabels = loadLabels();
+function loadLabels(){
+  try{
+    const s = localStorage.getItem('wys_bucket_labels');
+    if(s){
+      const parsed = JSON.parse(s);
+      return {
+        main: {...DEFAULT_LABELS.main, ...(parsed.main||{})},
+        sub:  {...DEFAULT_LABELS.sub,  ...(parsed.sub||{})},
+        short:{...DEFAULT_SHORT,       ...(parsed.short||{})},
+      };
+    }
+  }catch(_){}
+  return {main:{...DEFAULT_LABELS.main}, sub:{...DEFAULT_LABELS.sub}, short:{...DEFAULT_SHORT}};
+}
+function saveLabels(){
+  try{ localStorage.setItem('wys_bucket_labels', JSON.stringify(bucketLabels)); }catch(_){}
+}
+
+function mainLbl(cat){ return bucketLabels.main[cat] || cat; }
+function shortLbl(cat){ return bucketLabels.short[cat] || mainLbl(cat); }
+function subLbl(cat, sub){ return bucketLabels.sub[cat+':'+sub] || sub; }
+
+function renameMainBucket(cat, newLbl){
+  newLbl = (newLbl||'').trim();
+  if(!newLbl) return;
+  bucketLabels.main[cat] = newLbl;
+  // Short label: use the first word (cap 10 chars) unless the user customised it directly
+  bucketLabels.short[cat] = newLbl.length <= 10 ? newLbl : newLbl.split(/\s+/)[0].slice(0,10);
+  saveLabels();
+  rerenderAll();
+}
+function renameSubBucket(cat, sub, newLbl){
+  newLbl = (newLbl||'').trim();
+  if(!newLbl) return;
+  bucketLabels.sub[cat+':'+sub] = newLbl;
+  saveLabels();
+  rerenderAll();
+}
+function rerenderAll(){
+  if(document.getElementById('sd').classList.contains('on')){
+    refreshDashHeader(); renderDash();
+  }
+  if(document.getElementById('sr').classList.contains('on')){
+    renderReview();
+    // Update filter pill labels
+    document.querySelectorAll('.rfilt').forEach(el=>{
+      const f = el.getAttribute('data-f');
+      if(f && bucketLabels.main[f]) el.dataset.baseLbl = mainLbl(f);
+    });
+  }
+}
+
+// ── Double-click / double-tap inline editor ──
+// Works on desktop (native dblclick) and on mobile (two quick taps within 350ms on same element).
+const _tapTracker = new WeakMap();
+function makeEditable(el, getCurrentVal, setNewVal){
+  if(!el || el.__editableBound) return;
+  el.__editableBound = true;
+  el.classList.add('editable-lbl');
+  const fireEdit = (e)=>{
+    e.stopPropagation();
+    if(e.preventDefault) e.preventDefault();
+    beginInlineEdit(el, getCurrentVal(), setNewVal);
+  };
+  el.addEventListener('dblclick', fireEdit);
+  // Mobile fallback: double-tap detector
+  el.addEventListener('touchend', (e)=>{
+    const now = Date.now();
+    const last = _tapTracker.get(el) || 0;
+    if(now - last < 350){
+      _tapTracker.set(el, 0);
+      fireEdit(e);
+    } else {
+      _tapTracker.set(el, now);
+    }
+  }, {passive:false});
+}
+function beginInlineEdit(el, curVal, setNewVal){
+  if(el.querySelector('input.editable-input')) return; // already editing
+  const origHtml = el.innerHTML;
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.value = curVal;
+  input.className = 'editable-input';
+  input.setAttribute('maxlength', '30');
+  el.innerHTML = '';
+  el.appendChild(input);
+  input.focus();
+  input.select();
+  let done = false;
+  const finish = (save) => {
+    if(done) return; done = true;
+    const v = input.value.trim();
+    if(save && v && v !== curVal){
+      setNewVal(v); // triggers rerenderAll
+    } else {
+      el.innerHTML = origHtml;
+    }
+  };
+  input.addEventListener('blur', ()=>finish(true));
+  input.addEventListener('keydown', (ev)=>{
+    ev.stopPropagation();
+    if(ev.key === 'Enter'){ ev.preventDefault(); finish(true); }
+    else if(ev.key === 'Escape'){ ev.preventDefault(); finish(false); }
+  });
+  // Prevent click inside input from bubbling to parent handlers (e.g. sM())
+  input.addEventListener('click', e=>e.stopPropagation());
+  input.addEventListener('dblclick', e=>e.stopPropagation());
+}
+
+// ── Migration from older API responses ──
+function migrateCat(t){
+  if(t.cat==='investments'){ t.cat='savings_investments'; if(!t.sub||t.sub==='all') t.sub='committed'; }
+  return t;
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+// DEMO DATA (kept identical to v4)
+// ══════════════════════════════════════════════════════════════════════════
 const DEMO_TXNS = [
-  {date:'2025-10-15',merchant:'Salary Payment',amount:30000,type:'credit',cat:'income',sub:'direct',type:'salary',freq:'monthly'},
-  {date:'2025-10-18',merchant:'ADNOC Seih Sedirah',amount:160,type:'debit',cat:'expenses',sub:'transport',type:'fuel',freq:'monthly'},
-  {date:'2025-10-19',merchant:'Talabat.com',amount:85,type:'debit',cat:'expenses',sub:'food',type:'delivery',freq:'monthly'},
-  {date:'2025-10-20',merchant:'Selfdrive AE Dubai',amount:1415.30,type:'debit',cat:'expenses',sub:'transport',type:'car_rental',freq:'monthly'},
-  {date:'2025-10-22',merchant:'GEMS United Indian School',amount:1251,type:'debit',cat:'expenses',sub:'fees',type:'school_tuition',freq:'monthly'},
-  {date:'2025-10-25',merchant:'Lulu Hypermarket',amount:180,type:'debit',cat:'expenses',sub:'food',type:'supermarket',freq:'monthly'},
-  {date:'2025-10-28',merchant:'Installment Recovery 559R',amount:4332.93,type:'debit',cat:'loans',sub:'main',type:'personal_loan',freq:'monthly'},
-  {date:'2025-11-03',merchant:'Installment ref 1639',amount:1639,type:'debit',cat:'loans',sub:'main',type:'car_loan',freq:'monthly'},
-  {date:'2025-11-10',merchant:'Zurich Intl Life Ltd',amount:559.89,type:'debit',cat:'savings_investments',sub:'committed',type:'life_insurance',freq:'monthly'},
-  {date:'2025-11-12',merchant:'Glomo Dubai AE',amount:1101.75,type:'debit',cat:'savings_investments',sub:'committed',type:'insurance_usd',freq:'monthly',note:'Policy Bazaar USD $300/mo'},
-  {date:'2025-11-15',merchant:'Salary Payment',amount:30000,type:'credit',cat:'income',sub:'direct',type:'salary',freq:'monthly'},
-  {date:'2025-11-20',merchant:'Waitrose Supermarket',amount:145,type:'debit',cat:'expenses',sub:'food',type:'supermarket',freq:'monthly'},
-  {date:'2025-11-26',merchant:'Rita Towers rent',amount:9250,type:'debit',cat:'expenses',sub:'shelter',type:'rent',freq:'quarterly'},
-  {date:'2025-11-30',merchant:'Abu Dhabi Police',amount:206,type:'debit',cat:'expenses',sub:'misc',type:'traffic_fine',freq:'adhoc'},
-  {date:'2025-12-10',merchant:'Zurich Intl Life Ltd',amount:559.89,type:'debit',cat:'savings_investments',sub:'committed',type:'life_insurance',freq:'monthly'},
-  {date:'2025-12-15',merchant:'Salary Payment',amount:30750,type:'credit',cat:'income',sub:'direct',type:'salary',freq:'monthly'},
-  {date:'2025-12-25',merchant:'Policy Bazaar Gurgaon',amount:1904.13,type:'debit',cat:'savings_investments',sub:'committed',type:'insurance_inr',freq:'quarterly'},
-  {date:'2026-01-05',merchant:'GEMS United Indian School',amount:2096.25,type:'debit',cat:'expenses',sub:'fees',type:'school_tuition',freq:'monthly'},
-  {date:'2026-01-10',merchant:'Zurich Intl Life Ltd',amount:559.89,type:'debit',cat:'savings_investments',sub:'committed',type:'life_insurance',freq:'monthly'},
-  {date:'2026-01-12',merchant:'Glomo Dubai AE',amount:1101.75,type:'debit',cat:'savings_investments',sub:'committed',type:'insurance_usd',freq:'monthly',note:'Policy Bazaar USD $300/mo'},
-  {date:'2026-01-15',merchant:'Salary Payment',amount:30250,type:'credit',cat:'income',sub:'direct',type:'salary',freq:'monthly'},
-  {date:'2026-01-16',merchant:'Abu Dhabi Police',amount:981,type:'debit',cat:'expenses',sub:'misc',type:'traffic_fine',freq:'adhoc'},
-  {date:'2026-02-10',merchant:'Zurich Intl Life Ltd',amount:559.89,type:'debit',cat:'savings_investments',sub:'committed',type:'life_insurance',freq:'monthly'},
-  {date:'2026-02-15',merchant:'Salary Payment',amount:31580,type:'credit',cat:'income',sub:'direct',type:'salary',freq:'monthly'},
-  {date:'2026-02-20',merchant:'Talabat PostPaid',amount:620,type:'debit',cat:'expenses',sub:'food',type:'delivery',freq:'monthly'},
-  {date:'2026-03-10',merchant:'Zurich Intl Life Ltd',amount:559.89,type:'debit',cat:'savings_investments',sub:'committed',type:'life_insurance',freq:'monthly'},
-  {date:'2026-03-15',merchant:'Salary Payment',amount:33575,type:'credit',cat:'income',sub:'direct',type:'salary',freq:'monthly'},
-  {date:'2026-03-25',merchant:'Policy Bazaar Gurgaon',amount:1816.80,type:'debit',cat:'savings_investments',sub:'committed',type:'insurance_inr',freq:'quarterly'},
-  {date:'2026-04-01',merchant:'Rita Towers rent',amount:9250,type:'debit',cat:'expenses',sub:'shelter',type:'rent',freq:'quarterly'},
-  {date:'2026-04-07',merchant:'LIVAINS BSC',amount:1785,type:'debit',cat:'savings_investments',sub:'all',type:'car_insurance',freq:'annual'},
-  {date:'2026-04-08',merchant:'Abu Dhabi Police',amount:202,type:'debit',cat:'expenses',sub:'misc',type:'traffic_fine',freq:'adhoc'},
+  {date:'2025-10-15',merchant:'Salary Payment',amount:30000,direction:'CR',cat:'income',sub:'direct',type:'salary',freq:'monthly'},
+  {date:'2025-10-18',merchant:'ADNOC Seih Sedirah',amount:160,direction:'DR',cat:'expenses',sub:'transport',type:'fuel',freq:'monthly'},
+  {date:'2025-10-28',merchant:'Installment Recovery 559R',amount:4332.93,direction:'DR',cat:'loans',sub:'main',type:'loan_installment',freq:'monthly'},
 ];
 
 // ══ FILES ══
@@ -446,13 +567,81 @@ function renderFiles(){
     return `<div class="frow"><div class="fi" style="background:${bg}"><svg width="13" height="13" viewBox="0 0 24 24" fill="none"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" stroke="${c}" stroke-width="1.6"/><polyline points="14 2 14 8 20 8" stroke="${c}" stroke-width="1.6"/></svg></div><span class="fn">${f.name}</span><span class="fz">${sz}</span><button class="frb" onclick="removeFile(${i})">×</button></div>`;
   }).join('');
   const ab=document.getElementById('abtn'), fc=document.getElementById('fcnt');
-  if(files.length>0){ab.style.display='block';fc.textContent=`${files.length} file${files.length>1?'s':''}`;} 
+  if(files.length>0){ab.style.display='block';fc.textContent=`${files.length} file${files.length>1?'s':''}`;}
   else{ab.style.display='none';}
 }
-
 function loadDemo(){
   allTxns=DEMO_TXNS.map((t,i)=>({...t,_id:i,_deleted:false}));
+  dedupCrossStatement(allTxns);
   showReview();
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+// CROSS-STATEMENT DEDUPLICATION
+// ══════════════════════════════════════════════════════════════════════════
+// When you upload multiple statements, the SAME real-world money movement often
+// appears twice — once as a DR on a bank statement (money leaving account) and
+// once as a CR on a credit-card statement (payment received on card), or vice
+// versa for self-transfers between two of your own accounts.
+//
+// These are the same event seen from two angles. In a consolidated P&L they
+// should appear once, not twice. This function finds such pairs based on:
+//   · same absolute amount (tolerance ±0.50)
+//   · dates within ±3 days (to allow for value-date/posting-date drift)
+//   · opposite direction (one DR, one CR)
+//
+// Each pair is tagged with _xPaired=<id> so downstream totals can skip or
+// dim them. When a bank-side transfer pairs with a card-side "card_payment_received",
+// we auto-upgrade the bank side to loans/card_payment so the classification lines up.
+function dedupCrossStatement(txns){
+  // Reset any previous pairing state (in case we re-run)
+  txns.forEach(t => { delete t._xPaired; });
+  // Bucket txns by date for efficient lookup
+  const byDate = {};
+  txns.forEach((t, i) => {
+    if(!t.date || !t.amount) return;
+    if(!byDate[t.date]) byDate[t.date] = [];
+    byDate[t.date].push(i);
+  });
+  const used = new Set();
+  let pairId = 0;
+  for(let i = 0; i < txns.length; i++){
+    if(used.has(i)) continue;
+    const a = txns[i];
+    if(!a.date || !a.amount || a._deleted) continue;
+    const dA = new Date(a.date);
+    let matched = false;
+    // Widen search to ±3 days. Closest-day matches preferred (offset 0 first).
+    const offsets = [0, -1, 1, -2, 2, -3, 3];
+    for(const dOff of offsets){
+      if(matched) break;
+      const nd = new Date(dA.getTime() + dOff * 86400000);
+      const key = nd.toISOString().slice(0, 10);
+      const bucket = byDate[key] || [];
+      for(const j of bucket){
+        if(j === i || used.has(j)) continue;
+        const b = txns[j];
+        if(b._deleted) continue;
+        if(a.direction === b.direction) continue;           // must be opposite
+        if(Math.abs(a.amount - b.amount) > 0.50) continue;  // amount must match
+        // PAIR FOUND
+        pairId++;
+        const pid = 'p' + pairId;
+        a._xPaired = pid; b._xPaired = pid;
+        // Classification upgrade: if one side is a card payment received,
+        // reclassify the bank-side as a loan/card_payment so the pair belongs together
+        if(a.type === 'card_payment_received' && b.cat !== 'loans'){
+          b.cat = 'loans'; b.sub = 'main'; b.type = 'card_payment';
+        } else if(b.type === 'card_payment_received' && a.cat !== 'loans'){
+          a.cat = 'loans'; a.sub = 'main'; a.type = 'card_payment';
+        }
+        used.add(i); used.add(j);
+        matched = true;
+        break;
+      }
+    }
+  }
+  return { pairs_found: pairId };
 }
 
 // ══ ANALYSIS ══
@@ -465,7 +654,7 @@ async function startAnalysis(){
   show('sp');
   const estSecs=files.length*12;
   document.getElementById('ps').textContent=`Takes ~${estSecs}–${estSecs+30} seconds for ${files.length} file${files.length>1?'s':''}`;
-  const steps=files.map(f=>`Reading: ${f.name.slice(0,30)}`).concat(['Applying categorisation rules','Building review...']);
+  const steps=files.map(f=>`Reading: ${f.name.slice(0,30)}`).concat(['Applying categorisation rules','Finding cross-statement pairs','Building review...']);
   buildProg(steps); let idx=0;
   try{
     let all=[], skipped=[];
@@ -495,7 +684,6 @@ async function startAnalysis(){
         try{
           const res=await fetch(WORKER_URL,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'extract',text,filename:files[i].name})});
           if(res.status===429||res.status===529){await wait(8000);continue;}
-          // 413 = file too large (v4 api) — don't retry, surface clean message
           if(res.status===413){
             const d=await res.json();
             skipped.push({name:files[i].name,reason:'toolarge',detail:d.message});
@@ -511,11 +699,9 @@ async function startAnalysis(){
           const d=await res.json();
           if(d.error) throw new Error(d.message||d.error);
           all.push(...(d.transactions||[]));
-          // Aggregate Claude's self-reported transaction-line count across files
           if(typeof d.lines_detected==='number'){
             linesDetected=(linesDetected||0)+d.lines_detected;
           }
-          // Capture partial-success warnings (some chunks failed but others worked)
           if(d.warning){
             const detailStr=d.error_details?d.error_details.join(' | '):d.warning;
             skipped.push({name:files[i].name,reason:'partial',detail:detailStr,count:d.count||0});
@@ -555,7 +741,6 @@ async function startAnalysis(){
       }
       w.innerHTML=msg;
       document.querySelector('.pc').appendChild(w);
-      // Persist warnings for display in dashboard
       fileWarnings=skipped.slice();
       await wait(4000);
     } else {
@@ -565,11 +750,21 @@ async function startAnalysis(){
       throw new Error('No transactions could be extracted. Please check your files and try again.');
     }
     setAct(idx+1);
-    document.getElementById('ph').textContent='Building your dashboard...';
+    document.getElementById('ph').textContent='Applying classification rules...';
     await wait(400); setDone(idx+1); setAct(idx+2);
-    allTxns=all.map(migrateCat).map((t,i)=>({...t,_id:i,_deleted:false}));
-    await wait(300); setDone(idx+2);
-    // Skip review → go straight to dashboard
+
+    // Normalise + assign IDs
+    allTxns = all.map(migrateCat).map((t,i)=>({...t,_id:i,_deleted:false}));
+
+    // CROSS-STATEMENT DEDUP — run after all files are in, before showing the dashboard
+    document.getElementById('ph').textContent='Finding cross-statement pairs...';
+    const pairInfo = dedupCrossStatement(allTxns);
+    xPairCount = pairInfo.pairs_found;
+    console.log(`Cross-statement pairing: ${xPairCount} pair(s) found`);
+
+    await wait(300); setDone(idx+2); setAct(idx+3);
+    document.getElementById('ph').textContent='Building your dashboard...';
+    await wait(300); setDone(idx+3);
     await buildDashboard();
   }catch(e){
     document.getElementById('perr').style.display='block';
@@ -584,16 +779,13 @@ function showReview(){
   updateRevCount();
   renderReview();
 }
-
 function filterReview(f,el){
   activeFilter=f;
   document.querySelectorAll('.rfilt').forEach(x=>x.classList.remove('on'));
   el.classList.add('on');
   renderReview();
 }
-
 function renderReview(){
-  // Update counts on each filter pill
   const live=allTxns.filter(t=>!t._deleted);
   const counts={
     all: live.length,
@@ -605,7 +797,7 @@ function renderReview(){
   };
   document.querySelectorAll('.rfilt').forEach(el=>{
     const f=el.getAttribute('data-f');
-    const lbl={all:'All',income:'Income',expenses:'Expenses',savings_investments:'Savings',loans:'Loans',unknown:'Unmatched'}[f]||f;
+    const lbl = (f==='all') ? 'All' : (f==='unknown' ? 'Unmatched' : mainLbl(f));
     el.textContent=`${lbl} (${counts[f]||0})`;
   });
   const body=document.getElementById('rev-body');
@@ -618,17 +810,18 @@ function renderReview(){
   if(!visible.length){body.innerHTML=`<div class="rev-empty">No transactions in this filter</div>`;return;}
   body.innerHTML=visible.map(t=>{
     const catInfo=CATS[t.cat];
-    const catLabel=catInfo?`${catInfo.label}${t.sub&&t.sub!=='all'?' · '+catInfo.subs[t.sub]||t.sub:''}`:t.cat||'Unknown';
+    const catLabel=catInfo?`${mainLbl(t.cat)}${t.sub?' · '+subLbl(t.cat,t.sub):''}`:(t.cat||'Unknown');
     const catCls=catInfo?catInfo.color:'cat-unknown';
     const ftCls={'monthly':'fmo','quarterly':'fqt','annual':'fan'}[t.freq]||'fah';
     const dateStr=(t.date||'').slice(5).replace('-','/');
-    const amtColor=t.type==='credit'?'cr':'dr';
-    const prefix=t.type==='credit'?'+':'-';
-    const stfBadge=t.possibly_self_transfer?'<span class="stf-badge" title="This looks like a transfer to your own account. Consider moving it to Savings.">↔ self?</span>':'';
-    return `<div class="txn-row" id="tr-${t._id}">
+    const amtColor=t.direction==='CR'?'cr':'dr';
+    const prefix=t.direction==='CR'?'+':'-';
+    const stfBadge=t.possibly_self_transfer?'<span class="stf-badge" title="This looks like a transfer to your own account.">↔ self?</span>':'';
+    const xpBadge=t._xPaired?'<span class="xp-badge" title="Paired with another statement — nets to zero in totals.">⇅ paired</span>':'';
+    return `<div class="txn-row ${t._xPaired?'xp-row':''}" id="tr-${t._id}">
       <span class="txn-date">${dateStr}</span>
       <div style="flex:1;min-width:0">
-        <div class="txn-merchant">${t.merchant||'Unknown'}${stfBadge}</div>
+        <div class="txn-merchant">${t.merchant||'Unknown'}${stfBadge}${xpBadge}</div>
         ${t.note?`<div style="font-size:10px;color:var(--A);margin-top:1px">⚠ ${t.note}</div>`:''}
       </div>
       <span class="txn-amt ${amtColor}">${prefix}${fmt(t.amount)}</span>
@@ -639,7 +832,6 @@ function renderReview(){
   }).join('');
   updateRevCount();
 }
-
 function deleteTxn(id){
   const t=allTxns.find(x=>x._id===id);
   if(t) moveToRecycle([t]);
@@ -647,22 +839,25 @@ function deleteTxn(id){
   if(el) el.remove();
   updateRevCount();
 }
-
 function updateRevCount(){
   const active=allTxns.filter(t=>!t._deleted);
   document.getElementById('rev-count').textContent=`${active.length} transaction${active.length!==1?'s':''}`;
-  document.getElementById('rev-sub').textContent=`${active.length} transactions · tap category to reassign · × to remove`;
 }
 
 // ══ RECYCLE BIN ══
-// Replaces undo. Delete → moves transactions to recycle bin (sets _deleted=true).
-// User can restore any/all from the Recycle tab. Bin empties when page is refreshed.
 function moveToRecycle(txns){
   if(!txns||!txns.length) return;
   for(const t of txns){ if(t) t._deleted=true; }
+  // If a paired txn is deleted, unpair its partner so it counts again
+  for(const t of txns){
+    if(t && t._xPaired){
+      const partner = allTxns.find(x => x !== t && x._xPaired === t._xPaired);
+      if(partner) delete partner._xPaired;
+      delete t._xPaired;
+    }
+  }
   showRecycleToast(txns.length);
 }
-
 function showRecycleToast(n){
   const bnr=document.getElementById('recycle-toast');
   if(!bnr) return;
@@ -670,33 +865,24 @@ function showRecycleToast(n){
   if(lbl) lbl.textContent=n===1?`1 transaction moved to recycle bin`:`${n} transactions moved to recycle bin`;
   bnr.classList.add('on');
   if(toastTimer) clearTimeout(toastTimer);
-  toastTimer=setTimeout(()=>{
-    bnr.classList.remove('on');
-    toastTimer=null;
-  },3500);
+  toastTimer=setTimeout(()=>{ bnr.classList.remove('on'); toastTimer=null; },3500);
 }
-
-function hideRecycleToast(){
-  const bnr=document.getElementById('recycle-toast');
-  if(bnr) bnr.classList.remove('on');
-  if(toastTimer){clearTimeout(toastTimer); toastTimer=null;}
-}
-
 function restoreFromRecycle(id){
   const t=allTxns.find(x=>x._id===id);
   if(!t) return;
   t._deleted=false;
-  // Recompute everything
+  // Re-run cross-statement pairing to see if the restored txn finds a new partner
+  dedupCrossStatement(allTxns.filter(x=>!x._deleted));
   const active=allTxns.filter(x=>!x._deleted);
   plData=computePL(active);
   refreshDashHeader();
   renderDash();
 }
-
 function restoreAllFromRecycle(){
   const deleted=allTxns.filter(x=>x._deleted);
   if(!deleted.length) return;
   for(const t of deleted){ t._deleted=false; }
+  dedupCrossStatement(allTxns.filter(x=>!x._deleted));
   const active=allTxns.filter(x=>!x._deleted);
   plData=computePL(active);
   refreshDashHeader();
@@ -704,9 +890,6 @@ function restoreAllFromRecycle(){
 }
 
 // ══ BULK SELECT ══
-// Toggles a "multi-select" mode. In this mode, rows show checkboxes and tapping a row
-// toggles selection rather than opening the category picker. A sticky action bar at the
-// bottom lets user Delete or Move-to-category all selected items at once.
 function toggleBulkMode(){
   bulkMode=!bulkMode;
   if(!bulkMode) bulkSelected.clear();
@@ -716,20 +899,17 @@ function toggleBulkMode(){
   refreshBulkBar();
   renderDash();
 }
-
 function bulkToggleRow(id,ev){
   if(ev){ev.stopPropagation();}
   if(bulkSelected.has(id)) bulkSelected.delete(id);
   else bulkSelected.add(id);
   refreshBulkBar();
-  // Update just the row's checkbox visual without full re-render
   const row=document.getElementById('dr-'+id);
   if(row){
     const cb=row.querySelector('.bulk-cb');
     if(cb) cb.classList.toggle('on',bulkSelected.has(id));
   }
 }
-
 function refreshBulkBar(){
   const bar=document.getElementById('bulk-bar');
   if(!bar) return;
@@ -738,13 +918,11 @@ function refreshBulkBar(){
   const lbl=document.getElementById('bulk-bar-lbl');
   if(lbl) lbl.textContent=n===1?`1 selected`:`${n} selected`;
 }
-
 function bulkClear(){
   bulkSelected.clear();
   refreshBulkBar();
   renderDash();
 }
-
 function bulkDelete(){
   if(!bulkSelected.size) return;
   const toDel=[...bulkSelected].map(id=>allTxns.find(x=>x._id===id)).filter(Boolean);
@@ -756,16 +934,12 @@ function bulkDelete(){
   refreshDashHeader();
   renderDash();
 }
-
 function bulkMoveStart(){
   if(!bulkSelected.size) return;
-  // Re-use the existing category sheet. Tag it as a bulk operation.
   editingIdx='__bulk__';
-  const html=buildCatOptionsHtml(null,null);
-  document.getElementById('sheet-opts').innerHTML=html;
+  document.getElementById('sheet-opts').innerHTML=buildCatOptionsHtml(null,null);
   document.getElementById('overlay').classList.add('on');
 }
-
 function bulkAssign(cat,sub){
   const ids=[...bulkSelected];
   for(const id of ids){
@@ -782,17 +956,20 @@ function bulkAssign(cat,sub){
 }
 
 // ══ SHEET ══
-// Shared category-option HTML builder — used by single-row picker AND bulk picker.
+// Builds the category-picker HTML. Group labels (main buckets) and option labels
+// (sub buckets) are both double-tap-editable from the sheet — the rename applies
+// everywhere in the app once committed.
 function buildCatOptionsHtml(currentCat,currentSub){
   const cur=currentCat&&currentSub?`${currentCat}:${currentSub}`:null;
   const handler=editingIdx==='__bulk__'?'bulkAssign':'assignCat';
   let html='';
   for(const [cat,info] of Object.entries(CATS)){
-    html+=`<div class="cat-group"><div class="cat-group-label">${info.label}</div>`;
-    for(const [sub,label] of Object.entries(info.subs)){
+    html+=`<div class="cat-group">
+      <div class="cat-group-label editable-lbl" data-sheetlbl="main:${cat}">${mainLbl(cat)}</div>`;
+    for(const sub of info.subKeys){
       const val=`${cat}:${sub}`, sel=cur&&val===cur?'sel':'';
-      html+=`<div class="cat-opt ${sel}" onclick="${handler}('${cat}','${sub}')">
-        <span>${label}</span>
+      html+=`<div class="cat-opt ${sel}" data-cat="${cat}" data-sub="${sub}" onclick="${handler}('${cat}','${sub}')">
+        <span class="cat-opt-lbl editable-lbl" data-sheetlbl="sub:${cat}:${sub}" onclick="event.stopPropagation()">${subLbl(cat,sub)}</span>
         <div class="cat-check"></div>
       </div>`;
     }
@@ -800,24 +977,33 @@ function buildCatOptionsHtml(currentCat,currentSub){
   }
   return html;
 }
-
+function bindSheetEditables(){
+  // Wire up double-tap editing on sheet labels
+  document.querySelectorAll('#sheet-opts .editable-lbl[data-sheetlbl]').forEach(el=>{
+    const key = el.getAttribute('data-sheetlbl');
+    if(key.startsWith('main:')){
+      const cat = key.slice(5);
+      makeEditable(el, ()=>mainLbl(cat), (v)=>renameMainBucket(cat, v));
+    } else if(key.startsWith('sub:')){
+      const [, cat, sub] = key.split(':');
+      makeEditable(el, ()=>subLbl(cat, sub), (v)=>renameSubBucket(cat, sub, v));
+    }
+  });
+}
 function openSheet(id){
-  // If we're in bulk mode, taps on rows should toggle selection, not open the sheet
   if(bulkMode){ bulkToggleRow(id); return; }
   editingIdx=id;
   const t=allTxns.find(x=>x._id===id);
   if(!t) return;
   document.getElementById('sheet-opts').innerHTML=buildCatOptionsHtml(t.cat,t.sub);
   document.getElementById('overlay').classList.add('on');
+  bindSheetEditables();
 }
-
 function assignCat(cat,sub){
   const t=allTxns.find(x=>x._id===editingIdx);
   if(t){t.cat=cat; t.sub=sub;}
   closeSheet();
-  // Re-render whichever screen is currently showing
   if(document.getElementById('sd').classList.contains('on')){
-    // On dashboard — recompute totals + re-render
     const active=allTxns.filter(x=>!x._deleted);
     plData=computePL(active);
     refreshDashHeader();
@@ -826,32 +1012,205 @@ function assignCat(cat,sub){
     renderReview();
   }
 }
+function closeSheet(e){
+  if(e&&e.target!==document.getElementById('overlay')) return;
+  document.getElementById('overlay').classList.remove('on');
+  editingIdx=null;
+}
 
-// Re-compute totals/counts in header without refetching insight
+// ══ SUB-TAB BUILDERS — dynamic so renames reflect immediately ══
+function buildSubTabs(){
+  const build = (main, subs) => subs.map((sub, i) =>
+    `<div class="stab ${i===0&&cS[main]===sub?'on':(cS[main]===sub?'on':'')}" data-sub="${sub}" onclick="sS('${main}','${sub}',this)">
+       <span class="editable-lbl" data-sublbl="${main}:${sub}" onclick="event.stopPropagation()">${subLbl(main,sub)}</span>
+     </div>`
+  ).join('');
+  document.getElementById('sb-income').innerHTML = build('income', CATS.income.subKeys);
+  document.getElementById('sb-expenses').innerHTML = build('expenses', CATS.expenses.subKeys);
+  document.getElementById('sb-savings_investments').innerHTML = build('savings_investments', CATS.savings_investments.subKeys);
+  document.getElementById('sb-loans').innerHTML = build('loans', CATS.loans.subKeys);
+  // Re-mark the currently-selected sub-tab
+  ['income','expenses','savings_investments','loans'].forEach(main=>{
+    const active = cS[main];
+    document.querySelectorAll(`#sb-${main} .stab`).forEach(el=>{
+      el.classList.toggle('on', el.dataset.sub === active);
+    });
+  });
+  // Bind double-tap rename on each sub-tab label
+  document.querySelectorAll('.stab .editable-lbl[data-sublbl]').forEach(el=>{
+    const [cat, sub] = el.dataset.sublbl.split(':');
+    makeEditable(el, ()=>subLbl(cat, sub), (v)=>renameSubBucket(cat, sub, v));
+  });
+}
+
+// ══ BUILD DASHBOARD ══
+async function buildDashboard(){
+  const active=allTxns.filter(t=>!t._deleted);
+  if(!active.length) return;
+  plData=computePL(active);
+  show('sd');
+  refreshDashHeader();
+  buildSubTabs();
+  // Wire double-tap rename on the main-tab labels too
+  document.querySelectorAll('.mlbl[data-lblkey]').forEach(el=>{
+    const key = el.dataset.lblkey;
+    if(!key || key === '__all__') return;
+    const [, cat] = key.split(':');
+    makeEditable(el, ()=>shortLbl(cat), (v)=>renameMainBucket(cat, v));
+  });
+  document.querySelectorAll('.mt').forEach(t=>t.classList.remove('on'));
+  document.querySelector('.mt').classList.add('on');
+  cM='all'; cS.all='list';
+  document.querySelectorAll('[id^=sb-]').forEach(sb=>sb.style.display='none');
+  document.getElementById('sb-all').style.display='flex';
+  insightData=null;
+  renderDash();
+  fetchInsight(active).then(ins=>{
+    insightData=ins;
+    renderDash();
+  }).catch(err=>{
+    console.warn('Insight fetch failed:',err);
+    insightData={headline:null};
+    renderDash();
+  });
+}
+
+async function fetchInsight(active){
+  // _xPaired txns net to zero — exclude from the insight feed
+  const real = active.filter(t=>!t._xPaired);
+  const totals={
+    income: Math.round(real.filter(t=>t.cat==='income'&&t.direction==='CR').reduce((a,t)=>a+t.amount,0)),
+    expenses: Math.round(real.filter(t=>t.cat==='expenses'&&t.direction==='DR').reduce((a,t)=>a+t.amount,0)),
+    savings_investments: Math.round(real.filter(t=>t.cat==='savings_investments'&&t.direction==='DR').reduce((a,t)=>a+t.amount,0)),
+    loans: Math.round(real.filter(t=>t.cat==='loans'&&t.direction==='DR').reduce((a,t)=>a+t.amount,0)),
+  };
+  const mg={};
+  for(const t of real.filter(t=>t.cat==='expenses'&&t.direction==='DR')){
+    const k=t.merchant||'Unknown';
+    if(!mg[k])mg[k]={total:0,count:0,category:t.sub};
+    mg[k].total+=t.amount; mg[k].count+=1;
+  }
+  const top_merchants=Object.entries(mg)
+    .map(([merchant,v])=>({merchant,total:Math.round(v.total),count:v.count,category:v.category}))
+    .sort((a,b)=>b.total-a.total).slice(0,15);
+  const by_sub={};
+  for(const t of real.filter(t=>t.cat==='expenses'&&t.direction==='DR')){
+    by_sub[t.sub]=(by_sub[t.sub]||0)+t.amount;
+  }
+  Object.keys(by_sub).forEach(k=>by_sub[k]=Math.round(by_sub[k]));
+  let mom='';
+  if(plData.pl_months.length>1){
+    const last=plData.pl_months[plData.pl_months.length-1];
+    const prev=plData.pl_months[plData.pl_months.length-2];
+    const delta=last.exp-prev.exp;
+    const pct=prev.exp?Math.round((delta/prev.exp)*100):0;
+    mom=`Expenses in ${last.m}: AED ${last.exp} vs ${prev.m}: AED ${prev.exp} (${pct>=0?'+':''}${pct}%)`;
+  }
+  const summary={
+    period: plData.period_label.replace(/^Total · /,''),
+    months: plData.months,
+    totals, top_merchants, by_sub,
+    month_over_month: mom,
+  };
+  const res=await fetch(WORKER_URL,{
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({action:'insight',summary}),
+  });
+  if(!res.ok) throw new Error('insight http '+res.status);
+  return await res.json();
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+// P&L COMPUTATION
+// ══════════════════════════════════════════════════════════════════════════
+// Direction-aware totals: income counts only CR, everything else counts only DR.
+// Cross-statement-paired transactions (_xPaired) are EXCLUDED because both sides
+// of the pair together net to zero — they represent money you moved between your
+// own accounts, not real P&L events.
+function computePL(txns){
+  const monthMap={};
+  for(const t of txns){
+    if(t._xPaired) continue;  // skip paired — they net to zero
+    const m=(t.date||'').slice(0,7)||'unknown';
+    if(!monthMap[m]) monthMap[m]={inc:0,exp:0,sav:0,loans:0};
+    const amt=Number(t.amount)||0;
+    if(t.cat==='income' && t.direction==='CR') monthMap[m].inc+=amt;
+    else if(t.cat==='expenses' && t.direction==='DR') monthMap[m].exp+=amt;
+    else if(t.cat==='savings_investments' && t.direction==='DR') monthMap[m].sav+=amt;
+    else if(t.cat==='loans' && t.direction==='DR') monthMap[m].loans+=amt;
+    // A CR on an expense row (e.g. refund) is a negative expense — subtract
+    else if(t.cat==='expenses' && t.direction==='CR') monthMap[m].exp-=amt;
+    else if(t.cat==='income' && t.direction==='DR') monthMap[m].inc-=amt;
+  }
+  const MO={'01':'Jan','02':'Feb','03':'Mar','04':'Apr','05':'May','06':'Jun','07':'Jul','08':'Aug','09':'Sep','10':'Oct','11':'Nov','12':'Dec'};
+  const ymKeys=Object.keys(monthMap).filter(k=>k!=='unknown').sort();
+  const pl_months=ymKeys.map(ym=>{
+    const [yr,mo]=ym.split('-');
+    const v=monthMap[ym];
+    return{ym,m:`${MO[mo]||mo} ${(yr||'').slice(2)}`,inc:Math.round(v.inc),exp:Math.round(v.exp),sav:Math.round(v.sav),loans:Math.round(v.loans)};
+  });
+  const n=pl_months.length||1;
+  const totals=pl_months.reduce((a,r)=>({income:a.income+r.inc,expenses:a.expenses+r.exp,savings_investments:a.savings_investments+r.sav,loans:a.loans+r.loans}),{income:0,expenses:0,savings_investments:0,loans:0});
+  let period_label='Total';
+  if(ymKeys.length){
+    const first=ymKeys[0], last=ymKeys[ymKeys.length-1];
+    const [fy,fm]=first.split('-'), [ly,lm]=last.split('-');
+    period_label=first===last
+      ? `Total · ${MO[fm]} ${fy.slice(2)}`
+      : `Total · ${MO[fm]} ${fy.slice(2)} – ${MO[lm]} ${ly.slice(2)}`;
+  }
+  return{pl_months,ym_ordered:ymKeys,totals,surplus_avg:Math.round((totals.income-totals.expenses-totals.savings_investments-totals.loans)/n),months:n,period_label};
+}
+
+function buildMonthlyStrip(txns,plDataRef){
+  if(!plDataRef||!plDataRef.ym_ordered||plDataRef.ym_ordered.length<2) return '';
+  const MO={'01':'Jan','02':'Feb','03':'Mar','04':'Apr','05':'May','06':'Jun','07':'Jul','08':'Aug','09':'Sep','10':'Oct','11':'Nov','12':'Dec'};
+  const byMonth={};
+  // Respect direction + exclude paired
+  for(const t of txns){
+    if(t._xPaired) continue;
+    const ym=(t.date||'').slice(0,7);
+    if(!ym) continue;
+    const sign = t.direction==='CR' ? 1 : -1;
+    byMonth[ym]=(byMonth[ym]||0) + Math.abs(Number(t.amount)||0);
+  }
+  const cells=plDataRef.ym_ordered.map(ym=>{
+    const [,mo]=ym.split('-');
+    const v=Math.round(byMonth[ym]||0);
+    const zero=v===0;
+    return `<div class="mt-cell ${zero?'zero':''}"><div class="mt-cell-m">${MO[mo]||mo}</div><div class="mt-cell-v">${v>=1000?fK2(v):fmt(v)}</div></div>`;
+  }).join('');
+  return `<div class="mt-strip">${cells}</div>`;
+}
+
+// Re-compute dashboard header counts + values
 function refreshDashHeader(){
   const active=allTxns.filter(t=>!t._deleted);
   if(!active.length||!plData) return;
   const incTot=plData.totals.income, expTot=plData.totals.expenses;
   const invTot=plData.totals.savings_investments, loanTot=plData.totals.loans;
-  document.getElementById('dpd').textContent=`${plData.period_label.replace(/^Total · /,'')} · ${active.length} transactions`;
-  document.getElementById('dsurp').textContent=`AED ${fmt(plData.surplus_avg)}/mo`;
+  const pairedCount = active.filter(t=>t._xPaired).length;
+  const pairNote = pairedCount ? ` · ${pairedCount/2} pair${pairedCount/2===1?'':'s'} netted` : '';
+  document.getElementById('dpd').textContent = `${plData.period_label.replace(/^Total · /,'')} · ${active.length} transactions${pairNote}`;
+  // Main tab values (exclude paired — already handled inside computePL)
   const cnt={
-    all: active.length,
-    income: active.filter(t=>t.cat==='income').length,
-    expenses: active.filter(t=>t.cat==='expenses').length,
-    savings_investments: active.filter(t=>t.cat==='savings_investments').length,
-    loans: active.filter(t=>t.cat==='loans').length,
+    all: active.filter(t=>!t._xPaired).length,
+    income: active.filter(t=>t.cat==='income'&&!t._xPaired).length,
+    expenses: active.filter(t=>t.cat==='expenses'&&!t._xPaired).length,
+    savings_investments: active.filter(t=>t.cat==='savings_investments'&&!t._xPaired).length,
+    loans: active.filter(t=>t.cat==='loans'&&!t._xPaired).length,
   };
   document.getElementById('mv-a').textContent=''+cnt.all;
   document.getElementById('mv-i').textContent='AED '+fK(incTot);
   document.getElementById('mv-e').textContent='AED '+fK(expTot);
   document.getElementById('mv-v').textContent='AED '+fK(invTot);
   document.getElementById('mv-l').textContent='AED '+fK(loanTot);
-  document.getElementById('mlbl-i').textContent=`Income · ${cnt.income}`;
-  document.getElementById('mlbl-e').textContent=`Expenses · ${cnt.expenses}`;
-  document.getElementById('mlbl-v').textContent=`Savings · ${cnt.savings_investments}`;
-  document.getElementById('mlbl-l').textContent=`Loans · ${cnt.loans}`;
-  // Recycle tab visible only when something is in it
+  document.getElementById('mlbl-a').textContent='All';
+  document.getElementById('mlbl-i').textContent=`${shortLbl('income')} · ${cnt.income}`;
+  document.getElementById('mlbl-e').textContent=`${shortLbl('expenses')} · ${cnt.expenses}`;
+  document.getElementById('mlbl-v').textContent=`${shortLbl('savings_investments')} · ${cnt.savings_investments}`;
+  document.getElementById('mlbl-l').textContent=`${shortLbl('loans')} · ${cnt.loans}`;
   const binCount=allTxns.filter(t=>t._deleted).length;
   const recycleTab=document.getElementById('mt-recycle');
   if(recycleTab){
@@ -861,7 +1220,6 @@ function refreshDashHeader(){
   }
 }
 
-// Delete from dashboard row
 function dashDelete(id){
   const t=allTxns.find(x=>x._id===id);
   if(t) moveToRecycle([t]);
@@ -870,18 +1228,13 @@ function dashDelete(id){
   refreshDashHeader();
   renderDash();
 }
-
-// Expand/collapse the file-warning banner
 function toggleWarnDetail(){
   const d=document.getElementById('wbnr-detail');
   if(d) d.style.display=(d.style.display==='none'||!d.style.display)?'block':'none';
 }
 
-// ══ SUBSCRIPTION DETECTION ══
-// Heuristic: same merchant + amount within ±5% appearing 2+ times with gaps of 20-40 days
-// Returns array of {merchant, count, monthly, total, span, lastDate}
 function detectSubscriptions(txns){
-  const expenses=txns.filter(t=>t.cat==='expenses'&&t.direction==='DR'&&t.date);
+  const expenses=txns.filter(t=>t.cat==='expenses'&&t.direction==='DR'&&t.date&&!t._xPaired);
   const byMerchant={};
   for(const t of expenses){
     const key=t.merchant||'Unknown';
@@ -891,14 +1244,11 @@ function detectSubscriptions(txns){
   const results=[];
   for(const [merchant,items] of Object.entries(byMerchant)){
     if(items.length<2) continue;
-    // Group by similar amounts (within ±10%)
     items.sort((a,b)=>(a.date||'').localeCompare(b.date||''));
-    // Look for recurring at roughly monthly cadence
     const amounts=items.map(t=>t.amount);
     const avgAmt=amounts.reduce((a,b)=>a+b,0)/amounts.length;
     const allSimilar=amounts.every(a=>Math.abs(a-avgAmt)/avgAmt<0.15);
     if(!allSimilar) continue;
-    // Check gap distribution: at least half should be 20-40 day gaps
     const gaps=[];
     for(let i=1;i<items.length;i++){
       const d1=new Date(items[i-1].date), d2=new Date(items[i].date);
@@ -924,178 +1274,6 @@ function detectSubscriptions(txns){
   return results.sort((a,b)=>b.monthly-a.monthly);
 }
 
-function closeSheet(e){
-  if(e&&e.target!==document.getElementById('overlay')) return;
-  document.getElementById('overlay').classList.remove('on');
-  editingIdx=null;
-}
-
-// ══ BUILD DASHBOARD ══
-async function buildDashboard(){
-  const active=allTxns.filter(t=>!t._deleted);
-  if(!active.length) return;
-  // P&L computation is pure maths — no AI needed
-  plData=computePL(active);
-  show('sd');
-  // Avatar + initial user info (rest is set by refreshDashHeader)
-  document.getElementById('dav').textContent='W';
-  document.getElementById('dnm').textContent='Your money';
-  document.getElementById('mlbl-a').textContent='All';
-  refreshDashHeader(); // sets all counts/values/recycle visibility from plData + allTxns
-  // Reset tabs to All + default to All view
-  document.querySelectorAll('.mt').forEach(t=>t.classList.remove('on'));
-  document.querySelector('.mt').classList.add('on'); // first .mt is All
-  cM='all'; cS.all='list';
-  document.querySelectorAll('[id^=sb-]').forEach(sb=>sb.style.display='none');
-  document.getElementById('sb-all').style.display='flex';
-  // Render once with no insight, then re-render when insight arrives
-  insightData=null;
-  renderDash();
-  fetchInsight(active).then(ins=>{
-    insightData=ins;
-    renderDash();
-  }).catch(err=>{
-    console.warn('Insight fetch failed:',err);
-    insightData={headline:null};
-    renderDash();
-  });
-}
-
-// ══ INSIGHT FETCH — call API with summarized data ══
-async function fetchInsight(active){
-  // Build a compact summary for Claude
-  const totals={
-    income: Math.round(active.filter(t=>t.cat==='income').reduce((a,t)=>a+t.amount,0)),
-    expenses: Math.round(active.filter(t=>t.cat==='expenses').reduce((a,t)=>a+t.amount,0)),
-    savings_investments: Math.round(active.filter(t=>t.cat==='savings_investments').reduce((a,t)=>a+t.amount,0)),
-    loans: Math.round(active.filter(t=>t.cat==='loans').reduce((a,t)=>a+t.amount,0)),
-  };
-  // Top merchants (expenses only — savings transfers excluded by definition)
-  const mg={};
-  for(const t of active.filter(t=>t.cat==='expenses')){
-    const k=t.merchant||'Unknown';
-    if(!mg[k])mg[k]={total:0,count:0,category:t.sub};
-    mg[k].total+=t.amount; mg[k].count+=1;
-  }
-  const top_merchants=Object.entries(mg)
-    .map(([merchant,v])=>({merchant,total:Math.round(v.total),count:v.count,category:v.category}))
-    .sort((a,b)=>b.total-a.total).slice(0,15);
-  // By sub-category
-  const by_sub={};
-  for(const t of active.filter(t=>t.cat==='expenses')){
-    by_sub[t.sub]=(by_sub[t.sub]||0)+t.amount;
-  }
-  Object.keys(by_sub).forEach(k=>by_sub[k]=Math.round(by_sub[k]));
-  // Month-over-month (only if >1 month)
-  let mom='';
-  if(plData.pl_months.length>1){
-    const last=plData.pl_months[plData.pl_months.length-1];
-    const prev=plData.pl_months[plData.pl_months.length-2];
-    const delta=last.exp-prev.exp;
-    const pct=prev.exp?Math.round((delta/prev.exp)*100):0;
-    mom=`Expenses in ${last.m}: AED ${last.exp} vs ${prev.m}: AED ${prev.exp} (${pct>=0?'+':''}${pct}%)`;
-  }
-  const summary={
-    period: plData.period_label.replace(/^Total · /,''),
-    months: plData.months,
-    totals, top_merchants, by_sub,
-    month_over_month: mom,
-  };
-  const res=await fetch(WORKER_URL,{
-    method:'POST',
-    headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({action:'insight',summary}),
-  });
-  if(!res.ok) throw new Error('insight http '+res.status);
-  return await res.json();
-}
-
-
-// ══ PAIRED CARD PAYMENT NETTING ══
-// Detects DR/CR pairs on the Loans tab (same amount, within ±3 days) that represent
-// the same real transaction captured from two statements. Returns an annotated list.
-function netCardPayments(loansTxns){
-  const rows=[...loansTxns];
-  const pairs=[]; // array of [drIdx, crIdx]
-  const used=new Set();
-  for(let i=0;i<rows.length;i++){
-    if(used.has(i)) continue;
-    const a=rows[i];
-    if(a.type!=='card_payment' && a.type!=='card_payment_received') continue;
-    for(let j=i+1;j<rows.length;j++){
-      if(used.has(j)) continue;
-      const b=rows[j];
-      if(b.type!=='card_payment' && b.type!=='card_payment_received') continue;
-      // Must be opposite directions, matching amount, within 3 days
-      if(a.direction===b.direction) continue;
-      if(Math.abs(a.amount-b.amount)>1) continue;
-      const d1=new Date(a.date), d2=new Date(b.date);
-      const days=Math.abs((d1-d2)/(1000*60*60*24));
-      if(days>3) continue;
-      pairs.push([i,j]); used.add(i); used.add(j); break;
-    }
-  }
-  // Mark paired items
-  return rows.map((r,i)=>{
-    const pair=pairs.find(p=>p.includes(i));
-    return {...r, _paired: !!pair};
-  });
-}
-
-function computePL(txns){
-  const monthMap={};
-  for(const t of txns){
-    const m=(t.date||'').slice(0,7)||'unknown';
-    if(!monthMap[m]) monthMap[m]={inc:0,exp:0,sav:0,loans:0};
-    const amt=Number(t.amount)||0;
-    if(t.cat==='income') monthMap[m].inc+=amt;
-    else if(t.cat==='expenses') monthMap[m].exp+=amt;
-    else if(t.cat==='savings_investments') monthMap[m].sav+=amt;
-    else if(t.cat==='loans') monthMap[m].loans+=amt;
-  }
-  const MO={'01':'Jan','02':'Feb','03':'Mar','04':'Apr','05':'May','06':'Jun','07':'Jul','08':'Aug','09':'Sep','10':'Oct','11':'Nov','12':'Dec'};
-  const ymKeys=Object.keys(monthMap).filter(k=>k!=='unknown').sort();
-  const pl_months=ymKeys.map(ym=>{
-    const [yr,mo]=ym.split('-');
-    const v=monthMap[ym];
-    return{ym,m:`${MO[mo]||mo} ${(yr||'').slice(2)}`,inc:Math.round(v.inc),exp:Math.round(v.exp),sav:Math.round(v.sav),loans:Math.round(v.loans)};
-  });
-  const n=pl_months.length||1;
-  const totals=pl_months.reduce((a,r)=>({income:a.income+r.inc,expenses:a.expenses+r.exp,savings_investments:a.savings_investments+r.sav,loans:a.loans+r.loans}),{income:0,expenses:0,savings_investments:0,loans:0});
-  // Build a human-readable period label from actual data
-  let period_label='Total';
-  if(ymKeys.length){
-    const first=ymKeys[0], last=ymKeys[ymKeys.length-1];
-    const [fy,fm]=first.split('-'), [ly,lm]=last.split('-');
-    period_label=first===last
-      ? `Total · ${MO[fm]} ${fy.slice(2)}`
-      : `Total · ${MO[fm]} ${fy.slice(2)} – ${MO[lm]} ${ly.slice(2)}`;
-  }
-  return{pl_months,ym_ordered:ymKeys,totals,surplus_avg:Math.round((totals.income-totals.expenses-totals.savings_investments-totals.loans)/n),months:n,period_label};
-}
-
-// ══ MONTHLY TIMELINE HELPER ══
-// Given a set of transactions and the ordered month keys, produce a horizontal strip
-// showing "Jan 450 / Feb 520 / Mar 680 …". Returns HTML string. Returns empty string
-// if fewer than 2 months — no timeline to show.
-function buildMonthlyStrip(txns,plDataRef){
-  if(!plDataRef||!plDataRef.ym_ordered||plDataRef.ym_ordered.length<2) return '';
-  const MO={'01':'Jan','02':'Feb','03':'Mar','04':'Apr','05':'May','06':'Jun','07':'Jul','08':'Aug','09':'Sep','10':'Oct','11':'Nov','12':'Dec'};
-  const byMonth={};
-  for(const t of txns){
-    const ym=(t.date||'').slice(0,7);
-    if(!ym) continue;
-    byMonth[ym]=(byMonth[ym]||0)+(Number(t.amount)||0);
-  }
-  const cells=plDataRef.ym_ordered.map(ym=>{
-    const [,mo]=ym.split('-');
-    const v=Math.round(byMonth[ym]||0);
-    const zero=v===0;
-    return `<div class="mt-cell ${zero?'zero':''}"><div class="mt-cell-m">${MO[mo]||mo}</div><div class="mt-cell-v">${v>=1000?fK2(v):fmt(v)}</div></div>`;
-  }).join('');
-  return `<div class="mt-strip">${cells}</div>`;
-}
-
 // ══ DASHBOARD RENDER ══
 function sM(id,el){
   cM=id;
@@ -1110,38 +1288,35 @@ function renderDash(){
   const txns=allTxns.filter(t=>!t._deleted);
   const el=document.getElementById('db'), m=cM, s=cS[m]; let h='';
 
+  // Respect direction when summing within a category
   function catTxns(cat,sub){return txns.filter(t=>t.cat===cat&&(!sub||sub==='all'||t.sub===sub));}
-  function sumAmt(arr){return arr.reduce((a,t)=>a+(Number(t.amount)||0),0);}
-  function groupMerchant(arr){
-    const g={};
-    for(const t of arr){const k=t.merchant||'Unknown';if(!g[k])g[k]={amt:0,freq:t.freq,note:t.note};g[k].amt+=Number(t.amount)||0;}
-    return Object.entries(g).sort(([,a],[,b])=>b.amt-a.amt).map(([n,v])=>({n,s:'',f:v.freq,a:v.amt,note:v.note}));
-  }
-  // Interactive row — tap merchant to reassign, × to delete
+  function catTxnsActive(cat,sub){return catTxns(cat,sub).filter(t=>!t._xPaired);}
+  function sumAmtDirected(arr, dir){return arr.filter(t=>!t._xPaired && (!dir||t.direction===dir)).reduce((a,t)=>a+(Number(t.amount)||0),0);}
+
   function irx(t){
     const color=t.direction==='CR'?'G':(t.cat==='loans'?'B':(t.cat==='savings_investments'?'B':'R'));
     const sign=t.direction==='CR'?'+':'−';
     const dateStr=(t.date||'').slice(5).replace('-','/');
     const catInfo=CATS[t.cat];
-    const catLbl=catInfo?catInfo.label:t.cat;
-    const subLbl=t.type&&t.type!=='other'?' · '+t.type.replace(/_/g,' '):'';
-    const pairedBadge=t._paired?'<span style="font-size:9px;background:#e8eef5;color:#3e5676;border-radius:4px;padding:1px 5px;margin-left:6px">paired</span>':'';
-    const stfBadge=t.possibly_self_transfer?'<span class="stf-badge" title="This looks like a transfer to your own account. Consider moving it to Savings.">↔ self?</span>':'';
+    const catLbl=catInfo?mainLbl(t.cat):t.cat;
+    const subLabel=t.sub?' · '+subLbl(t.cat,t.sub):'';
+    const xpBadge=t._xPaired?'<span class="xp-badge" title="Paired across statements — nets to zero in totals.">⇅ paired</span>':'';
+    const stfBadge=t.possibly_self_transfer?'<span class="stf-badge" title="This looks like a self-transfer.">↔ self?</span>':'';
     const selected=bulkSelected.has(t._id);
     if(bulkMode){
-      return `<div class="ir ${selected?'bulk-sel':''}" id="dr-${t._id}" onclick="bulkToggleRow(${t._id},event)" style="cursor:pointer">
+      return `<div class="ir ${selected?'bulk-sel':''} ${t._xPaired?'xp-row':''}" id="dr-${t._id}" onclick="bulkToggleRow(${t._id},event)" style="cursor:pointer">
         <div class="bulk-cb ${selected?'on':''}"></div>
         <div class="il" style="flex:1;min-width:0">
-          <div class="inm">${t.merchant}${pairedBadge}${stfBadge}</div>
-          <div class="is">${dateStr} · ${catLbl}${subLbl}</div>
+          <div class="inm">${t.merchant}${xpBadge}${stfBadge}</div>
+          <div class="is">${dateStr} · ${catLbl}${subLabel}</div>
         </div>
         <div class="ira"><div class="ia c${color}">${sign}AED ${fmt(t.amount)}</div></div>
       </div>`;
     }
-    return `<div class="ir" id="dr-${t._id}">
+    return `<div class="ir ${t._xPaired?'xp-row':''}" id="dr-${t._id}">
       <div class="il" style="cursor:pointer" onclick="openSheet(${t._id})">
-        <div class="inm">${t.merchant}${pairedBadge}${stfBadge}</div>
-        <div class="is">${dateStr} · ${catLbl}${subLbl}</div>
+        <div class="inm">${t.merchant}${xpBadge}${stfBadge}</div>
+        <div class="is">${dateStr} · ${catLbl}${subLabel}</div>
       </div>
       <div class="ira" style="display:flex;align-items:center;gap:8px">
         <div class="ia c${color}">${sign}AED ${fmt(t.amount)}</div>
@@ -1150,7 +1325,6 @@ function renderDash(){
     </div>`;
   }
 
-  // ─── Persistent warning banner (if any files had issues) ───
   if(fileWarnings && fileWarnings.length){
     const byType=fileWarnings.reduce((a,w)=>{a[w.reason]=(a[w.reason]||0)+1;return a;},{});
     const parts=[];
@@ -1167,7 +1341,6 @@ function renderDash(){
     </div>`;
   }
 
-  // ─── Insight card (Claude-generated, one per session) ───
   if(insightData===null){
     h+=`<div class="insight-card loading">
       <div class="ins-hd">💡 Finding a pattern…</div>
@@ -1181,14 +1354,21 @@ function renderDash(){
   }
 
   if(m==='all'){
-    // All transactions view — chronological, interactive rows
     const sorted=[...txns].sort((a,b)=>(b.date||'').localeCompare(a.date||''));
-    const totCr=txns.filter(t=>t.direction==='CR').reduce((a,t)=>a+(Number(t.amount)||0),0);
-    const totDr=txns.filter(t=>t.direction==='DR').reduce((a,t)=>a+(Number(t.amount)||0),0);
-    h+=stats2([{l:d.period_label||'All',v:''+txns.length+' txns',c:''},{l:'Money in',v:'AED '+fmt(totCr),c:'G'},{l:'Money out',v:'AED '+fmt(totDr),c:'R'}]);
-    // Coverage verification — only show when Claude's detected count differs from extracted count
+    const totCr=txns.filter(t=>t.direction==='CR'&&!t._xPaired).reduce((a,t)=>a+(Number(t.amount)||0),0);
+    const totDr=txns.filter(t=>t.direction==='DR'&&!t._xPaired).reduce((a,t)=>a+(Number(t.amount)||0),0);
+    const pairedCount=txns.filter(t=>t._xPaired).length;
+    h+=stats2([
+      {l:d.period_label||'All',v:''+txns.length+' txns',c:''},
+      {l:'Money in (net)',v:'AED '+fmt(totCr),c:'G'},
+      {l:'Money out (net)',v:'AED '+fmt(totDr),c:'R'},
+    ]);
+    // Cross-statement pairing notice
+    if(pairedCount>0){
+      h+=`<div class="ins iB" style="font-size:11.5px;margin-top:0;margin-bottom:10px">⇅ <strong>${pairedCount/2} cross-statement pair${pairedCount/2===1?'':'s'}</strong> detected (${pairedCount} rows). These represent the same money movement recorded on two statements — they're dimmed below and excluded from totals so you don't double-count self-transfers and card-bill payments.</div>`;
+    }
     if(linesDetected!=null){
-      const extracted=allTxns.length; // before any user deletions
+      const extracted=allTxns.length;
       if(linesDetected===extracted){
         h+=`<div style="font-size:11px;color:var(--G);background:var(--Gl);border:1px solid rgba(26,122,74,.2);border-radius:6px;padding:7px 11px;margin-bottom:10px;display:flex;align-items:center;gap:6px"><span>✓</span><span>All ${extracted} transaction lines detected in your statements were extracted.</span></div>`;
       } else if(linesDetected>extracted){
@@ -1196,12 +1376,10 @@ function renderDash(){
         h+=`<div style="font-size:11px;color:#5c3c06;background:var(--Ab);border:1px solid rgba(146,96,10,.3);border-radius:6px;padding:7px 11px;margin-bottom:10px;display:flex;align-items:center;gap:6px"><span>⚠</span><span>${extracted} of ${linesDetected} transaction lines extracted — ${diff} skipped (duplicates or unreadable rows).</span></div>`;
       }
     }
-    // Monthly timeline — net money flow per month
     if(d.pl_months.length>=2){
-      h+=secl('Monthly activity');
+      h+=secl('Monthly activity (net)');
       h+=`<div class="mt-strip">${d.pl_months.map(pm=>{
         const net=pm.inc-pm.exp-pm.sav-pm.loans;
-        const cls=net>=0?'':'zero';
         return `<div class="mt-cell"><div class="mt-cell-m">${pm.m.split(' ')[0]}</div><div class="mt-cell-v" style="color:${net>=0?'var(--G)':'var(--R)'}">${net>=0?'+':'−'}${fK2(Math.abs(net))}</div></div>`;
       }).join('')}</div>`;
     }
@@ -1212,30 +1390,28 @@ function renderDash(){
     h+=`</div>`;
   }
   else if(m==='income'){
-    const direct=catTxns('income','direct'), indirect=catTxns('income','indirect');
-    const currentSet=s==='direct'?direct:indirect;
-    const currentLbl=s==='direct'?'Direct income':'Indirect income';
-    h+=stats2([{l:'Total',v:'AED '+fmt(sumAmt(currentSet)),c:'G'},{l:'Monthly avg',v:'AED '+fmt(Math.round(sumAmt(currentSet)/d.months))},{l:'Transactions',v:''+currentSet.length}]);
-    // Monthly timeline for this sub
-    const strip=buildMonthlyStrip(currentSet,d);
+    const active = catTxns('income', s);
+    const totCr = sumAmtDirected(active, 'CR');
+    const totDr = sumAmtDirected(active, 'DR');
+    const net = totCr - totDr;
+    const currentLbl = subLbl('income', s);
+    h+=stats2([{l:'Net total',v:'AED '+fmt(net),c:'G'},{l:'Monthly avg',v:'AED '+fmt(Math.round(net/d.months))},{l:'Transactions',v:''+active.length}]);
+    const strip=buildMonthlyStrip(active.filter(t=>t.direction==='CR'),d);
     if(strip){ h+=secl(`${currentLbl} by month`); h+=strip; }
     h+=secl(`${currentLbl} · tap to reassign · × to delete`);
     h+=`<div class="ig">`;
-    if(!currentSet.length) h+=`<div style="padding:14px 0;text-align:center;font-size:12px;color:var(--t3)">No transactions</div>`;
-    currentSet.sort((a,b)=>(b.date||'').localeCompare(a.date||'')).forEach(t=>{h+=irx(t);});
+    if(!active.length) h+=`<div style="padding:14px 0;text-align:center;font-size:12px;color:var(--t3)">No transactions</div>`;
+    active.sort((a,b)=>(b.date||'').localeCompare(a.date||'')).forEach(t=>{h+=irx(t);});
     h+=`</div>`;
   }
   else if(m==='expenses'){
-    const sub=s;
-    const txnsInSub=catTxns('expenses',sub);
-    const tot=sumAmt(txnsInSub);
-    h+=stats2([{l:d.period_label||'Total',v:'AED '+fmt(tot),c:'R'},{l:'Monthly avg',v:'AED '+fmt(Math.round(tot/d.months))},{l:'Transactions',v:''+txnsInSub.length}]);
-    // Monthly timeline for this sub
-    const strip=buildMonthlyStrip(txnsInSub,d);
-    const subLbl=CATS.expenses.subs[sub]||sub;
-    if(strip){ h+=secl(`${subLbl} by month`); h+=strip; }
-    // Subscription audit — shown only in Misc tab
-    if(sub==='misc'){
+    const active = catTxns('expenses', s);
+    const tot = sumAmtDirected(active, 'DR') - sumAmtDirected(active, 'CR');
+    const subLabel = subLbl('expenses', s);
+    h+=stats2([{l:d.period_label||'Total',v:'AED '+fmt(tot),c:'R'},{l:'Monthly avg',v:'AED '+fmt(Math.round(tot/d.months))},{l:'Transactions',v:''+active.length}]);
+    const strip=buildMonthlyStrip(active.filter(t=>t.direction==='DR'),d);
+    if(strip){ h+=secl(`${subLabel} by month`); h+=strip; }
+    if(s==='misc'){
       const subs=detectSubscriptions(txns);
       if(subs.length){
         const subsTotal=subs.reduce((a,s)=>a+s.monthly,0);
@@ -1247,49 +1423,48 @@ function renderDash(){
         h+=`</div>`;
       }
     }
-    h+=secl(`${subLbl} · tap to reassign · × to delete`);
+    h+=secl(`${subLabel} · tap to reassign · × to delete`);
     h+=`<div class="ig">`;
-    const sorted=txnsInSub.sort((a,b)=>(b.date||'').localeCompare(a.date||''));
+    const sorted=active.sort((a,b)=>(b.date||'').localeCompare(a.date||''));
     sorted.forEach(t=>{h+=irx(t);});
     if(!sorted.length) h+=`<div style="padding:14px 0;text-align:center;font-size:12px;color:var(--t3)">No transactions</div>`;
     h+=`</div>`;
   }
   else if(m==='savings_investments'){
     const sub=s||'liquid';
-    const subTxns=catTxns('savings_investments',sub);
-    const tot=sumAmt(subTxns);
-    const subLbl=CATS.savings_investments.subs[sub]||sub;
-    h+=stats2([{l:d.period_label||'Total',v:'AED '+fmt(tot),c:'B'},{l:'Monthly avg',v:'AED '+fmt(Math.round(tot/d.months))},{l:'Plans',v:''+new Set(subTxns.map(t=>t.merchant)).size}]);
-    const strip=buildMonthlyStrip(subTxns,d);
-    if(strip){ h+=secl(`${subLbl} by month`); h+=strip; }
-    h+=secl(`${subLbl} · tap to reassign · × to delete`);
+    const active = catTxns('savings_investments', sub);
+    const tot = sumAmtDirected(active, 'DR') - sumAmtDirected(active, 'CR');
+    const subLabel = subLbl('savings_investments', sub);
+    h+=stats2([{l:d.period_label||'Total',v:'AED '+fmt(tot),c:'B'},{l:'Monthly avg',v:'AED '+fmt(Math.round(tot/d.months))},{l:'Plans',v:''+new Set(active.map(t=>t.merchant)).size}]);
+    const strip=buildMonthlyStrip(active.filter(t=>t.direction==='DR'),d);
+    if(strip){ h+=secl(`${subLabel} by month`); h+=strip; }
+    h+=secl(`${subLabel} · tap to reassign · × to delete`);
     h+=`<div class="ig">`;
-    if(!subTxns.length) h+=`<div style="padding:14px 0;text-align:center;font-size:12px;color:var(--t3)">No transactions${sub==='liquid'?' — tap "↔ self?" flagged items on other tabs to move them here':''}</div>`;
-    subTxns.sort((a,b)=>(b.date||'').localeCompare(a.date||'')).forEach(t=>{h+=irx(t);});
+    if(!active.length) h+=`<div style="padding:14px 0;text-align:center;font-size:12px;color:var(--t3)">No transactions${sub==='liquid'?' — tap "↔ self?" flagged items on other tabs to move them here':''}</div>`;
+    active.sort((a,b)=>(b.date||'').localeCompare(a.date||'')).forEach(t=>{h+=irx(t);});
     h+=`</div>`;
   }
   else if(m==='loans'){
-    const loansRaw=catTxns('loans');
-    const loans=netCardPayments(loansRaw);
-    const pairedCount=loans.filter(t=>t._paired).length;
-    const drTot=loans.filter(t=>t.direction==='DR').reduce((a,t)=>a+t.amount,0);
+    const loansAll=catTxns('loans');  // includes paired
+    const loansActive=loansAll.filter(t=>!t._xPaired);
+    const pairedCount=loansAll.filter(t=>t._xPaired).length;
+    const drTot=loansActive.filter(t=>t.direction==='DR').reduce((a,t)=>a+t.amount,0);
     const salaryMonthly=d.totals.income/(d.months||1)||1;
     h+=stats2([{l:d.period_label||'Total',v:'AED '+fmt(drTot),c:'B'},{l:'Monthly',v:'AED '+fmt(Math.round(drTot/d.months))},{l:'% income',v:Math.round(drTot/d.months/salaryMonthly*100)+'%'}]);
-    // Monthly timeline — DR only (outflows)
-    const strip=buildMonthlyStrip(loans.filter(t=>t.direction==='DR'),d);
+    const strip=buildMonthlyStrip(loansActive.filter(t=>t.direction==='DR'),d);
     if(strip){ h+=secl('Payments by month'); h+=strip; }
     if(pairedCount>0){
-      h+=`<div class="ins iG" style="font-size:11px">ℹ ${pairedCount/2} payment${pairedCount/2>1?'s':''} appear on both a bank statement (debit) and a credit-card statement (credit) — marked "paired". The net cash-flow impact is only the debit side.</div>`;
+      h+=`<div class="ins iB" style="font-size:11px">⇅ ${pairedCount/2} payment${pairedCount/2>1?'s':''} appear on both statements (bank debit + card credit). Shown dimmed; only one side counts toward the total.</div>`;
     }
     h+=secl('Payments · tap to reassign · × to delete');
     h+=`<div class="ig">`;
-    if(!loans.length) h+=`<div style="padding:14px 0;text-align:center;font-size:12px;color:var(--t3)">No transactions</div>`;
-    loans.sort((a,b)=>(b.date||'').localeCompare(a.date||'')).forEach(t=>{h+=irx(t);});
+    if(!loansAll.length) h+=`<div style="padding:14px 0;text-align:center;font-size:12px;color:var(--t3)">No transactions</div>`;
+    loansAll.sort((a,b)=>(b.date||'').localeCompare(a.date||'')).forEach(t=>{h+=irx(t);});
     h+=`</div>`;
   }
   else if(m==='pl'){
     if(s==='monthly'){
-      h+=`<div class="af"><span>P&L</span> = <span>Income</span> − <span>Expenses</span> − <span>Savings &amp; Inv.</span> − <span>Loans</span></div>`;
+      h+=`<div class="af"><span>P&L</span> = <span>${shortLbl('income')}</span> − <span>${shortLbl('expenses')}</span> − <span>${shortLbl('savings_investments')}</span> − <span>${shortLbl('loans')}</span></div>`;
       h+=`<div style="overflow-x:auto"><table class="plt" style="min-width:280px"><thead><tr><th>Month</th><th>Inc.</th><th>Exp.</th><th>S&amp;I</th><th>Loans</th><th>P&L</th></tr></thead><tbody>`;
       let grand=0;
       d.pl_months.forEach(r=>{
@@ -1298,17 +1473,17 @@ function renderDash(){
       });
       const {income:ti,expenses:te,savings_investments:tv,loans:tl}=d.totals;
       h+=`<tr class="tot"><td>Total</td><td class="pp">${fK2(ti)}</td><td class="pn">${fK2(te)}</td><td class="pn">${fK2(tv)}</td><td class="pn">${fK2(tl)}</td><td class="${grand>=0?'pp':'pn'}">${grand>=0?'+':''}${fK2(Math.abs(grand))}</td></tr></tbody></table></div>`;
-      h+=ins('G',`Average monthly surplus: <strong>AED ${fmt(d.surplus_avg)}</strong>. Savings and investments are subtracted because they reflect money set aside, not consumed.`);
+      h+=ins('G',`Average monthly surplus: <strong>AED ${fmt(d.surplus_avg)}</strong>. Cross-statement pairs (self-transfers / bank→card payments) are excluded so you don't double-count.`);
     }else{
       const n=d.months||1;
       const {income:ti,expenses:te,savings_investments:tv,loans:tl}=d.totals;
       const surplus=Math.round((ti-te-tv-tl)/n);
       h+=`<div class="af">Monthly averages over ${n} month${n!==1?'s':''}</div>`;
       h+=`<div class="ig">`;
-      h+=ir('Income',`AED ${fmt(Math.round(ti/n))}/mo avg`,'','+AED '+fmt(Math.round(ti/n)),'G','/mo avg');
-      h+=ir('Expenses',`AED ${fmt(Math.round(te/n))}/mo avg`,'','-AED '+fmt(Math.round(te/n)),'R','');
-      h+=ir('Savings &amp; Investments',`AED ${fmt(Math.round(tv/n))}/mo avg`,'','-AED '+fmt(Math.round(tv/n)),'B','');
-      h+=ir('Loans',`AED ${fmt(Math.round(tl/n))}/mo avg`,'','-AED '+fmt(Math.round(tl/n)),'B','');
+      h+=ir(mainLbl('income'),`AED ${fmt(Math.round(ti/n))}/mo avg`,'','+AED '+fmt(Math.round(ti/n)),'G','/mo avg');
+      h+=ir(mainLbl('expenses'),`AED ${fmt(Math.round(te/n))}/mo avg`,'','-AED '+fmt(Math.round(te/n)),'R','');
+      h+=ir(mainLbl('savings_investments'),`AED ${fmt(Math.round(tv/n))}/mo avg`,'','-AED '+fmt(Math.round(tv/n)),'B','');
+      h+=ir(mainLbl('loans'),`AED ${fmt(Math.round(tl/n))}/mo avg`,'','-AED '+fmt(Math.round(tl/n)),'B','');
       h+=`</div>`;
       h+=`<div style="margin-top:10px">
         <div class="scr main"><span style="font-weight:600">Monthly surplus</span><span style="font-weight:700;color:${surplus>=0?'var(--G)':'var(--R)'}">${surplus>=0?'+':'−'}AED ${fmt(Math.abs(surplus))}</span></div>
@@ -1316,7 +1491,6 @@ function renderDash(){
     }
   }
   else if(m==='recycle'){
-    // Recycle bin — list all deleted transactions with a Restore button each
     const deleted=allTxns.filter(t=>t._deleted).sort((a,b)=>(b.date||'').localeCompare(a.date||''));
     h+=stats2([{l:'In bin',v:''+deleted.length+' txns',c:''},{l:'Restorable',v:'All',c:'G'},{l:'On refresh',v:'Cleared',c:''}]);
     if(deleted.length>0){
@@ -1330,13 +1504,12 @@ function renderDash(){
     deleted.forEach(t=>{
       const dateStr=(t.date||'').slice(5).replace('-','/');
       const catInfo=CATS[t.cat];
-      const catLbl=catInfo?catInfo.label:t.cat;
+      const catLblShort=catInfo?mainLbl(t.cat):t.cat;
       const sign=t.direction==='CR'?'+':'−';
-      const color=t.direction==='CR'?'var(--G)':'var(--t2)';
       h+=`<div class="recycle-row">
         <div style="flex:1;min-width:0">
           <div style="font-size:13px;color:var(--t)">${t.merchant}</div>
-          <div style="font-size:11px;color:var(--t3);margin-top:2px">${dateStr} · ${catLbl} · ${sign}AED ${fmt(t.amount)}</div>
+          <div style="font-size:11px;color:var(--t3);margin-top:2px">${dateStr} · ${catLblShort} · ${sign}AED ${fmt(t.amount)}</div>
         </div>
         <button class="recycle-restore" onclick="restoreFromRecycle(${t._id})">↺ Restore</button>
       </div>`;
@@ -1348,7 +1521,6 @@ function renderDash(){
 }
 
 // ══ HELPERS ══
-function ftg(f){const m={monthly:'fmo',quarterly:'fqt',annual:'fan',adhoc:'fah'};const c=m[f]||'fah';return `<span class="ftg ${c}">${(f||'adhoc').toUpperCase().slice(0,2)}</span>`;}
 function ir(name,sub,fh,amt,ac,per){return `<div class="ir"><div class="il"><div class="inm">${name}${fh||''}</div>${sub?`<div class="is">${sub}</div>`:''}</div><div class="ira"><div class="ia ${ac?'c'+ac:''}">${amt}</div>${per?`<div class="ip">${per}</div>`:''}</div></div>`;}
 function stats2(arr){return `<div class="sr2">${arr.map(s=>`<div class="sc2"><div class="sl">${s.l}</div><div class="sv ${s.c?'c'+s.c:''}">${s.v}</div></div>`).join('')}</div>`;}
 function secl(t){return `<div class="secl">${t}</div>`;}
@@ -1377,6 +1549,7 @@ let stepCt=0;
 function buildProg(steps){stepCt=steps.length;document.getElementById('prog').innerHTML=steps.map((s,i)=>`<div class="pr"><div class="pdot wait" id="pd${i}"></div><span class="ptxt wait" id="pt${i}">${s}</span></div>`).join('');}
 function setAct(i){if(i>=stepCt)return;document.getElementById('pd'+i)?.setAttribute('class','pdot act');document.getElementById('pt'+i)?.setAttribute('class','ptxt act');}
 function setDone(i){if(i>=stepCt)return;document.getElementById('pd'+i)?.setAttribute('class','pdot done');document.getElementById('pt'+i)?.setAttribute('class','ptxt done');}
+
 </script>
 </body>
 </html>
