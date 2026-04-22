@@ -203,6 +203,30 @@ html,body{height:100%;font-family:'DM Sans',sans-serif;background:var(--bg);colo
 /* Warning banner (persistent file-warnings on dashboard) */
 .wbnr{background:var(--Ab);border:1px solid rgba(146,96,10,.3);border-left:3px solid #c9941a;border-radius:6px;padding:10px 12px;font-size:11.5px;color:#5c3c06;margin-bottom:10px;display:flex;align-items:center;gap:8px;cursor:pointer;line-height:1.4}
 .wbnr:hover{background:#fdf3d9}
+
+/* Bulk-select checkboxes on rows */
+.bulk-cb{width:18px;height:18px;border:1.5px solid var(--bm);border-radius:4px;flex:0 0 auto;margin-right:10px;transition:all .15s;position:relative;background:#fff}
+.bulk-cb.on{background:var(--G);border-color:var(--G)}
+.bulk-cb.on::after{content:'';position:absolute;left:4px;top:1px;width:4px;height:9px;border:solid #fff;border-width:0 2px 2px 0;transform:rotate(45deg)}
+.ir.bulk-sel{background:var(--Gl);border-radius:6px;padding:8px 8px 8px 10px;margin:0 -8px;border-bottom-color:transparent}
+
+/* Sticky bulk action bar (bottom of screen when rows selected) */
+.bulk-bar{position:fixed;left:50%;bottom:20px;transform:translateX(-50%) translateY(120%);background:var(--t);color:#fff;border-radius:999px;padding:10px 10px 10px 20px;display:flex;align-items:center;gap:8px;box-shadow:0 8px 24px rgba(0,0,0,.25);font-size:13px;font-weight:500;transition:transform .2s cubic-bezier(.4,0,.2,1);z-index:1000;max-width:calc(100vw - 32px)}
+.bulk-bar.on{transform:translateX(-50%) translateY(0)}
+.bba{background:rgba(255,255,255,.15);color:#fff;border:none;border-radius:999px;padding:7px 14px;font-size:12px;font-weight:500;cursor:pointer;font-family:inherit;transition:background .1s}
+.bba:hover{background:rgba(255,255,255,.25)}
+.bba-del{background:var(--R)}
+.bba-del:hover{background:#d14839}
+.bba-ghost{background:transparent;color:rgba(255,255,255,.7)}
+.bba-ghost:hover{background:rgba(255,255,255,.1);color:#fff}
+
+/* Undo banner (slides up after delete) */
+.undo-bnr{position:fixed;left:50%;bottom:20px;transform:translateX(-50%) translateY(120%);background:var(--t);color:#fff;border-radius:999px;padding:10px 8px 10px 18px;display:flex;align-items:center;gap:10px;box-shadow:0 8px 24px rgba(0,0,0,.25);font-size:13px;transition:transform .2s cubic-bezier(.4,0,.2,1);z-index:999;max-width:calc(100vw - 32px)}
+.undo-bnr.on{transform:translateX(-50%) translateY(0)}
+.undo-btn{background:transparent;color:#7fc59c;border:none;font-weight:600;font-size:13px;cursor:pointer;font-family:inherit;padding:4px 10px;border-radius:6px}
+.undo-btn:hover{background:rgba(127,197,156,.15)}
+.undo-x{background:transparent;border:none;color:rgba(255,255,255,.5);font-size:18px;cursor:pointer;padding:0 8px;line-height:1}
+.undo-x:hover{color:#fff}
 </style>
 </head>
 <body>
@@ -292,6 +316,7 @@ html,body{height:100%;font-family:'DM Sans',sans-serif;background:var(--bg);colo
       </div>
       <div style="display:flex;align-items:center;gap:6px">
         <div class="sppill"><svg width="9" height="9" viewBox="0 0 24 24" fill="none"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/></svg><span id="dsurp">—</span></div>
+        <button class="nb" id="btn-select" onclick="toggleBulkMode()"><svg width="10" height="10" viewBox="0 0 24 24" fill="none"><path d="M9 11l3 3L22 4" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg><span id="btn-select-lbl">Select</span></button>
         <button class="nb" onclick="show('sr')"><svg width="10" height="10" viewBox="0 0 24 24" fill="none"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>Edit</button>
         <button class="nb" onclick="show('su')"><svg width="10" height="10" viewBox="0 0 24 24" fill="none"><path d="M3 12a9 9 0 109-9M3 3v6h6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>New</button>
       </div>
@@ -312,6 +337,19 @@ html,body{height:100%;font-family:'DM Sans',sans-serif;background:var(--bg);colo
   <div id="sb-loans" class="sb" style="display:none"><div class="stab on" onclick="sS('loans','main',this)">Both loans</div></div>
   <div id="sb-pl" class="sb" style="display:none"><div class="stab on" onclick="sS('pl','monthly',this)">Monthly</div><div class="stab" onclick="sS('pl','avg',this)">Averages</div></div>
   <div class="db" id="db"></div>
+  <!-- Bulk action bar (sticks to bottom when bulk mode + selection active) -->
+  <div id="bulk-bar" class="bulk-bar">
+    <div style="flex:1"><span id="bulk-bar-lbl">0 selected</span></div>
+    <button class="bba" onclick="bulkMoveStart()">Move to…</button>
+    <button class="bba bba-del" onclick="bulkDelete()">Delete</button>
+    <button class="bba bba-ghost" onclick="bulkClear()">Clear</button>
+  </div>
+  <!-- Undo banner (slides up from bottom after delete) -->
+  <div id="undo-bnr" class="undo-bnr">
+    <span id="undo-bnr-lbl">Deleted 1 transaction</span>
+    <button class="undo-btn" onclick="undoLastDelete()">Undo</button>
+    <button class="undo-x" onclick="hideUndoBanner()" aria-label="dismiss">×</button>
+  </div>
 </div>
 
 <script>
@@ -323,7 +361,14 @@ let files=[], allTxns=[], plData=null;
 let cM='all', cS={all:'list',income:'direct',expenses:'food',invest:'all',loans:'main',pl:'monthly'};
 let activeFilter='all', editingIdx=null;
 let fileWarnings=[]; // persistent: {name, reason, detail, count}
+let fileStats=[]; // persistent: {name, extracted, estimated, textChars, source} per successfully-processed file
 let insightData=null; // {headline, detail, tone} — null until loaded
+// Undo state: stack of recently-deleted txn snapshots (capped, LIFO)
+let deletedStack=[]; // [{t: txn snapshot, ts: when}]
+let undoTimer=null;
+// Bulk-select state
+let bulkMode=false;
+let bulkSelected=new Set(); // _id's of selected txns
 
 // ══ CATEGORY CONFIG ══
 const CATS = {
@@ -574,10 +619,14 @@ function renderReview(){
 
 function deleteTxn(id){
   const t=allTxns.find(x=>x._id===id);
-  if(t) t._deleted=true;
+  if(t){
+    pushUndo([t]); // enable undo
+    t._deleted=true;
+  }
   const el=document.getElementById('tr-'+id);
   if(el) el.remove();
   updateRevCount();
+  showUndoBanner();
 }
 
 function updateRevCount(){
@@ -586,31 +635,171 @@ function updateRevCount(){
   document.getElementById('rev-sub').textContent=`${active.length} transactions · tap category to reassign · × to remove`;
 }
 
+// ══ UNDO ══
+// Stack-based undo for deletes. Push a snapshot before deleting; pop to restore.
+// Also auto-dismisses the banner after 8 seconds.
+function pushUndo(txns){
+  if(!txns||!txns.length) return;
+  // Capture ids only — we flip _deleted=false to restore
+  deletedStack.push({ids: txns.map(t=>t._id), ts: Date.now()});
+  // Cap the stack at 20 entries to avoid unbounded growth
+  if(deletedStack.length>20) deletedStack.shift();
+}
+
+function showUndoBanner(){
+  const bnr=document.getElementById('undo-bnr');
+  if(!bnr||!deletedStack.length) return;
+  const last=deletedStack[deletedStack.length-1];
+  const count=last.ids.length;
+  const lbl=document.getElementById('undo-bnr-lbl');
+  if(lbl) lbl.textContent=count===1?`Deleted 1 transaction`:`Deleted ${count} transactions`;
+  bnr.classList.add('on');
+  // Reset auto-dismiss timer
+  if(undoTimer) clearTimeout(undoTimer);
+  undoTimer=setTimeout(()=>{
+    bnr.classList.remove('on');
+    undoTimer=null;
+  },8000);
+}
+
+function hideUndoBanner(){
+  const bnr=document.getElementById('undo-bnr');
+  if(bnr) bnr.classList.remove('on');
+  if(undoTimer){clearTimeout(undoTimer); undoTimer=null;}
+}
+
+function undoLastDelete(){
+  if(!deletedStack.length) return;
+  const last=deletedStack.pop();
+  for(const id of last.ids){
+    const t=allTxns.find(x=>x._id===id);
+    if(t) t._deleted=false;
+  }
+  hideUndoBanner();
+  // Re-render whichever screen is active + recompute
+  if(document.getElementById('sd').classList.contains('on')){
+    const active=allTxns.filter(x=>!x._deleted);
+    plData=computePL(active);
+    refreshDashHeader();
+    renderDash();
+  } else {
+    renderReview();
+  }
+}
+
+// ══ BULK SELECT ══
+// Toggles a "multi-select" mode. In this mode, rows show checkboxes and tapping a row
+// toggles selection rather than opening the category picker. A sticky action bar at the
+// bottom lets user Delete or Move-to-category all selected items at once.
+function toggleBulkMode(){
+  bulkMode=!bulkMode;
+  if(!bulkMode) bulkSelected.clear();
+  const lbl=document.getElementById('btn-select-lbl');
+  if(lbl) lbl.textContent=bulkMode?'Done':'Select';
+  refreshDashHeader();
+  refreshBulkBar();
+  renderDash();
+}
+
+function bulkToggleRow(id,ev){
+  if(ev){ev.stopPropagation();}
+  if(bulkSelected.has(id)) bulkSelected.delete(id);
+  else bulkSelected.add(id);
+  refreshBulkBar();
+  // Update just the row's checkbox visual without full re-render
+  const row=document.getElementById('dr-'+id);
+  if(row){
+    const cb=row.querySelector('.bulk-cb');
+    if(cb) cb.classList.toggle('on',bulkSelected.has(id));
+  }
+}
+
+function refreshBulkBar(){
+  const bar=document.getElementById('bulk-bar');
+  if(!bar) return;
+  const n=bulkSelected.size;
+  bar.classList.toggle('on',bulkMode&&n>0);
+  const lbl=document.getElementById('bulk-bar-lbl');
+  if(lbl) lbl.textContent=n===1?`1 selected`:`${n} selected`;
+}
+
+function bulkClear(){
+  bulkSelected.clear();
+  refreshBulkBar();
+  renderDash();
+}
+
+function bulkDelete(){
+  if(!bulkSelected.size) return;
+  const toDel=[...bulkSelected].map(id=>allTxns.find(x=>x._id===id)).filter(Boolean);
+  pushUndo(toDel);
+  for(const t of toDel){ t._deleted=true; }
+  bulkSelected.clear();
+  bulkMode=false;
+  const active=allTxns.filter(x=>!x._deleted);
+  if(plData) plData=computePL(active);
+  refreshDashHeader();
+  renderDash();
+  showUndoBanner();
+}
+
+function bulkMoveStart(){
+  if(!bulkSelected.size) return;
+  // Re-use the existing category sheet. Tag it as a bulk operation.
+  editingIdx='__bulk__';
+  const html=buildCatOptionsHtml(null,null);
+  document.getElementById('sheet-opts').innerHTML=html;
+  document.getElementById('overlay').classList.add('on');
+}
+
+function bulkAssign(cat,sub){
+  const ids=[...bulkSelected];
+  for(const id of ids){
+    const t=allTxns.find(x=>x._id===id);
+    if(t){t.cat=cat; t.sub=sub;}
+  }
+  bulkSelected.clear();
+  bulkMode=false;
+  closeSheet();
+  const active=allTxns.filter(x=>!x._deleted);
+  if(plData) plData=computePL(active);
+  refreshDashHeader();
+  renderDash();
+}
+
 // ══ SHEET ══
-function openSheet(id){
-  editingIdx=id;
-  const t=allTxns.find(x=>x._id===id);
-  if(!t) return;
-  const cur=`${t.cat}:${t.sub}`;
+// Shared category-option HTML builder — used by single-row picker AND bulk picker.
+function buildCatOptionsHtml(currentCat,currentSub){
+  const cur=currentCat&&currentSub?`${currentCat}:${currentSub}`:null;
+  const handler=editingIdx==='__bulk__'?'bulkAssign':'assignCat';
   let html='';
   for(const [cat,info] of Object.entries(CATS)){
     html+=`<div class="cat-group"><div class="cat-group-label">${info.label}</div>`;
     for(const [sub,label] of Object.entries(info.subs)){
-      const val=`${cat}:${sub}`, sel=val===cur?'sel':'';
-      html+=`<div class="cat-opt ${sel}" onclick="assignCat('${cat}','${sub}')">
+      const val=`${cat}:${sub}`, sel=cur&&val===cur?'sel':'';
+      html+=`<div class="cat-opt ${sel}" onclick="${handler}('${cat}','${sub}')">
         <span>${label}</span>
         <div class="cat-check"></div>
       </div>`;
     }
     html+='</div>';
   }
-  document.getElementById('sheet-opts').innerHTML=html;
+  return html;
+}
+
+function openSheet(id){
+  // If we're in bulk mode, taps on rows should toggle selection, not open the sheet
+  if(bulkMode){ bulkToggleRow(id); return; }
+  editingIdx=id;
+  const t=allTxns.find(x=>x._id===id);
+  if(!t) return;
+  document.getElementById('sheet-opts').innerHTML=buildCatOptionsHtml(t.cat,t.sub);
   document.getElementById('overlay').classList.add('on');
 }
 
 function assignCat(cat,sub){
   const t=allTxns.find(x=>x._id===editingIdx);
-  if(t){t.cat=cat;t.sub=sub;}
+  if(t){t.cat=cat; t.sub=sub;}
   closeSheet();
   // Re-render whichever screen is currently showing
   if(document.getElementById('sd').classList.contains('on')){
@@ -653,11 +842,15 @@ function refreshDashHeader(){
 // Delete from dashboard row
 function dashDelete(id){
   const t=allTxns.find(x=>x._id===id);
-  if(t) t._deleted=true;
+  if(t){
+    pushUndo([t]);
+    t._deleted=true;
+  }
   const active=allTxns.filter(x=>!x._deleted);
   if(plData) plData=computePL(active);
   refreshDashHeader();
   renderDash();
+  showUndoBanner();
 }
 
 // Expand/collapse the file-warning banner
@@ -824,6 +1017,7 @@ async function fetchInsight(active){
   return await res.json();
 }
 
+
 // ══ PAIRED CARD PAYMENT NETTING ══
 // Detects DR/CR pairs on the Loans tab (same amount, within ±3 days) that represent
 // the same real transaction captured from two statements. Returns an annotated list.
@@ -917,6 +1111,17 @@ function renderDash(){
     const catLbl=catInfo?catInfo.label:t.cat;
     const subLbl=t.type&&t.type!=='other'?' · '+t.type.replace(/_/g,' '):'';
     const pairedBadge=t._paired?'<span style="font-size:9px;background:#e8eef5;color:#3e5676;border-radius:4px;padding:1px 5px;margin-left:6px">paired</span>':'';
+    const selected=bulkSelected.has(t._id);
+    if(bulkMode){
+      return `<div class="ir ${selected?'bulk-sel':''}" id="dr-${t._id}" onclick="bulkToggleRow(${t._id},event)" style="cursor:pointer">
+        <div class="bulk-cb ${selected?'on':''}"></div>
+        <div class="il" style="flex:1;min-width:0">
+          <div class="inm">${t.merchant}${pairedBadge}</div>
+          <div class="is">${dateStr} · ${catLbl}${subLbl}</div>
+        </div>
+        <div class="ira"><div class="ia c${color}">${sign}AED ${fmt(t.amount)}</div></div>
+      </div>`;
+    }
     return `<div class="ir" id="dr-${t._id}">
       <div class="il" style="cursor:pointer" onclick="openSheet(${t._id})">
         <div class="inm">${t.merchant}${pairedBadge}</div>
@@ -1075,6 +1280,7 @@ function renderDash(){
     }
   }
   el.innerHTML=h;
+  refreshBulkBar();
 }
 
 // ══ HELPERS ══
