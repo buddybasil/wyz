@@ -17,16 +17,17 @@ const RETRY_DELAY_MS      = 1500;
 // ══ TAXONOMY (same as v4) ══
 const TAXONOMY_PROMPT = `
 CATEGORIES (pick one as "cat"):
-- "income"      → money coming in (salary, refunds, cashback, dividends, rental income, inter-account transfers IN)
-- "expenses"    → real spending (consumption — food, fuel, rent, utilities, insurance, healthcare, etc.)
-- "investments" → capital build-up (stocks, gold, mutual funds, crypto, retirement, life-insurance premiums with surrender value)
-- "loans"       → credit card bill payments (both directions) and loan/EMI/mortgage payments
+- "income"              → money coming in (salary, refunds, cashback, dividends, rental income, transfers IN)
+- "expenses"            → real consumption (food, fuel, rent, utilities, insurance, healthcare, etc.)
+- "savings_investments" → money set aside for later (savings deposits, emergency fund, life insurance, stocks, retirement, crypto, gold)
+- "loans"               → credit card bill payments (both directions) and loan/EMI/mortgage payments
 
 SUB-CATEGORIES:
-- If cat="income":      "direct" (salary/wages only) OR "indirect" (everything else)
-- If cat="expenses":    "food" | "shelter" | "transport" | "fees" | "misc"
-- If cat="investments": always "all"
-- If cat="loans":       always "main"
+- If cat="income":              "direct" (salary/wages) OR "indirect" (everything else)
+- If cat="expenses":            "food" | "shelter" | "transport" | "fees" | "misc"
+- If cat="savings_investments": "liquid" (cash-accessible: savings deposits, emergency fund, money market)
+                                OR "committed" (locked-in growth: life insurance, stocks, retirement, crypto, gold)
+- If cat="loans":               always "main"
 
 TYPE:
 - Food:      supermarket, food_delivery, dining_out, convenience_store
@@ -38,25 +39,18 @@ TYPE:
              transfer_out, other
 - Income:    salary, bonus, cashback, dividend, refund, rental_income,
              insurance_reimbursement, savings_profit, interest, transfer_in, other_income
-- Investment: equity, gold, life_insurance, mutual_fund, crypto, bond, retirement
+- Savings/Investments: savings_deposit, emergency_fund, equity, gold, life_insurance, mutual_fund, crypto, bond, retirement
 - Loan:      card_payment, card_payment_received, loan_installment, mortgage_payment
 
 FREQUENCY: "monthly" | "weekly" | "quarterly" | "annual" | "adhoc"
 
-AVOIDABLE (true/false): Set true ONLY for clearly discretionary spending:
-- food_delivery, dining_out
-- ride_hail (when not essential)
-- entertainment, most subscriptions
-- non-essential online_shopping, clothing
-Set false for essentials: groceries, fuel, rent, utilities, healthcare, education, insurance, all loans, all income, all investments.
-
 CRITICAL CLASSIFICATION RULES:
 
 1. **Insurance** — distinguish carefully:
-   - LIFE insurance (Zurich Life, Aviva, MetLife, LIC, HDFC Life, Sukoon Life) → cat="investments", type="life_insurance"
-   - MOTOR insurance (NEXT CAR, car insurance, auto insurance) → cat="expenses", sub="misc", type="insurance", avoidable=false
-   - HEALTH insurance → cat="expenses", sub="misc", type="insurance", avoidable=false
-   - TRAVEL/HOME/OTHER insurance → cat="expenses", sub="misc", type="insurance", avoidable=false
+   - LIFE insurance with cash/surrender value (Zurich Life, Aviva, MetLife, LIC, HDFC Life, Sukoon Life) → cat="savings_investments", sub="committed", type="life_insurance"
+   - MOTOR insurance (NEXT CAR, car insurance, auto insurance) → cat="expenses", sub="misc", type="insurance"
+   - HEALTH insurance → cat="expenses", sub="misc", type="insurance"
+   - TRAVEL/HOME/OTHER insurance → cat="expenses", sub="misc", type="insurance"
    - Unspecified "LIVA", "ALLIANCE INSURANCE", "POLICY BAZAAR" → default expenses/misc/insurance UNLESS clearly life
    - Insurance REFUNDS → cat="income", type="insurance_reimbursement"
 
@@ -66,15 +60,22 @@ CRITICAL CLASSIFICATION RULES:
 
 3. **Loan/EMI** — "INSTALLMENT RECOVERY", "EMI", "MORTGAGE" → cat="loans", type="loan_installment"
 
-4. **Inter-account transfers** (same name sender/receiver):
-   - CR → cat="income", sub="indirect", type="transfer_in"
-   - DR → cat="expenses", sub="misc", type="transfer_out"
+4. **Transfers between accounts** — capture but classify conservatively:
+   - DR (money out to another party/account): default cat="expenses", sub="misc", type="transfer_out"
+   - CR (money in from another party): cat="income", sub="indirect", type="transfer_in"
+   - **Self-transfer flag**: if you can identify the account holder's own name from the statement
+     header (e.g. "MR BASIL ABRAHAM" at the top), and a DR transfer goes to that SAME name,
+     add a "possibly_self_transfer": true field (as an extra JSON field). Do NOT auto-move it — let the
+     user decide whether it's actually a savings transfer or a payment to someone else with
+     the same name. The flag is a hint, not a verdict.
 
 5. **Gov fees/fines** (POLICE, SMARTDXB, TASJEEL, RTA, DMV) → cat="expenses", sub="transport", type="gov_services"
 
 6. **Telecom/utility** (DU, ETISALAT, VIRGIN, E&, Verizon, AT&T) → cat="expenses", sub="shelter", type="internet_phone"
 
 7. **Salary** always cat="income", sub="direct", type="salary", freq="monthly"
+
+8. **Explicit savings deposits** — labeled "SAVINGS", "FIXED DEPOSIT", "FD", "TERM DEPOSIT" → cat="savings_investments", sub="liquid", type="savings_deposit"
 `.trim();
 
 const EXTRACT_PROMPT = `You are a financial transaction analyzer. You receive raw text from a bank or credit-card statement (any country, any bank, any currency) and return clean structured transactions.
@@ -116,8 +117,8 @@ For each transaction return this JSON object:
   "sub": sub-category,
   "type": specific type,
   "freq": frequency,
-  "avoidable": boolean,
-  "note": short context (<=40 chars) or null
+  "note": short context (<=40 chars) or null,
+  "possibly_self_transfer": true | false | null  (include only when flagging a DR transfer to the holder's own name; omit otherwise)
 }
 
 ${TAXONOMY_PROMPT}
@@ -130,10 +131,30 @@ GLOBAL MERCHANT GUIDE (use your knowledge for any merchant):
 - Uber/Lyft/Ola/Careem → ride_hail
 - Talabat/Deliveroo/DoorDash/Swiggy/Zomato → food_delivery
 - Lulu/Carrefour/Spinneys/Waitrose/Tesco → supermarket
-- SELFDRIVE/GLOMO → car_rental, avoidable=false
+- SELFDRIVE/GLOMO → car_rental
 - TAMARA/TABBY (BNPL) → online_shopping
 
-Return ONLY a JSON array of transactions. No preamble, no code fences, no commentary, no metadata wrapper. If you truly find zero transactions, return [].`;
+═══ OUTPUT FORMAT ═══
+
+Return TWO things, one per line:
+
+Line 1: A JSON metadata object: {"lines_detected": N}
+  where N = the total number of transaction-like rows you identified in the statement
+  (i.e. every row that had a date + debit/credit amount, INCLUDING ones you ended up extracting).
+  This helps the user verify coverage.
+
+Line 2: The JSON array of transactions.
+
+Example:
+{"lines_detected": 47}
+[
+  {"date": "2026-04-10", "merchant": "...", "amount": 100, ...},
+  ...
+]
+
+If zero transactions: {"lines_detected": 0}\\n[]
+
+No preamble, no code fences, no commentary outside this format.`;
 
 // ══ INSIGHT PROMPT — tuned for short, specific, behaviorally-useful observations ══
 const INSIGHT_PROMPT = `You are a thoughtful financial coach. Given a user's categorized spending summary, write ONE single observation that will stick with them psychologically before their next spending decision.
@@ -205,20 +226,25 @@ function setCors(res) {
 }
 
 function parseJsonArray(raw) {
-  if (!raw) return [];
+  if (!raw) return {items: [], meta: null};
   const clean = raw.replace(/```json|```/g, '').trim();
+  // Extract the metadata object if present at the start: {"lines_detected": N}
+  let meta = null;
+  const metaMatch = clean.match(/^\{[^{}\[\]]*"lines_detected"[^{}\[\]]*\}/);
+  if (metaMatch) {
+    try { meta = JSON.parse(metaMatch[0]); } catch { meta = null; }
+  }
   const start = clean.indexOf('[');
-  if (start === -1) return [];
+  if (start === -1) return {items: [], meta};
   // Try a clean full-array parse first
   const end = clean.lastIndexOf(']');
   if (end !== -1) {
-    try { 
+    try {
       const parsed = JSON.parse(clean.slice(start, end + 1));
-      if (Array.isArray(parsed)) return parsed;
+      if (Array.isArray(parsed)) return {items: parsed, meta};
     } catch { /* fall through to object-by-object recovery */ }
   }
-  // Recovery mode: truncated response (max_tokens hit) or missing closing ].
-  // Extract each complete top-level object {...} by tracking brace depth through the string.
+  // Recovery mode: truncated response. Extract complete {...} objects via brace-depth tracking.
   const body = clean.slice(start + 1);
   const objects = [];
   let depth = 0;
@@ -243,7 +269,7 @@ function parseJsonArray(raw) {
       }
     }
   }
-  return objects;
+  return {items: objects, meta};
 }
 
 function parseJsonObject(raw) {
@@ -257,16 +283,20 @@ function parseJsonObject(raw) {
 }
 
 const VALID_EXP_SUBS = new Set(['food', 'shelter', 'transport', 'fees', 'misc']);
-const VALID_CATS = new Set(['income', 'expenses', 'investments', 'loans']);
+const VALID_SAV_SUBS = new Set(['liquid', 'committed']);
+const VALID_CATS = new Set(['income', 'expenses', 'savings_investments', 'loans']);
 
 function normalizeTxn(t) {
   const direction = (t.direction || '').toUpperCase() === 'CR' ? 'CR' : 'DR';
-  let cat = VALID_CATS.has(t.cat) ? t.cat : (direction === 'CR' ? 'income' : 'expenses');
+  // Migrate legacy "investments" category to new "savings_investments"
+  let cat = t.cat;
+  if (cat === 'investments') cat = 'savings_investments';
+  if (!VALID_CATS.has(cat)) cat = direction === 'CR' ? 'income' : 'expenses';
   let sub = t.sub;
-  if (cat === 'investments')      sub = 'all';
-  else if (cat === 'loans')       sub = 'main';
-  else if (cat === 'income')      sub = (sub === 'direct' ? 'direct' : 'indirect');
-  else if (cat === 'expenses')    sub = VALID_EXP_SUBS.has(sub) ? sub : 'misc';
+  if (cat === 'savings_investments') sub = VALID_SAV_SUBS.has(sub) ? sub : 'committed';
+  else if (cat === 'loans')          sub = 'main';
+  else if (cat === 'income')         sub = (sub === 'direct' ? 'direct' : 'indirect');
+  else if (cat === 'expenses')       sub = VALID_EXP_SUBS.has(sub) ? sub : 'misc';
   return {
     date: t.date || null,
     merchant: String(t.merchant || 'Unknown').slice(0, 120),
@@ -276,8 +306,8 @@ function normalizeTxn(t) {
     cat, sub,
     type: t.type || 'other',
     freq: t.freq || 'adhoc',
-    avoidable: Boolean(t.avoidable),
     note: t.note || null,
+    possibly_self_transfer: Boolean(t.possibly_self_transfer),
   };
 }
 
@@ -343,7 +373,7 @@ async function runChunksConcurrent(chunks, filename, apiKey) {
           maxTokens: MAX_TOKENS,
           timeoutMs: CLAUDE_TIMEOUT_MS,
         });
-        const parsed = parseJsonArray(raw);
+        const {items: parsed, meta} = parseJsonArray(raw);
         // Detect likely truncation: long response that doesn't end with a closing ]
         const trimmedEnd = raw.trimEnd().replace(/```$/, '').trimEnd();
         const looksTruncated = raw.length > 12000 && !trimmedEnd.endsWith(']');
@@ -357,9 +387,11 @@ async function runChunksConcurrent(chunks, filename, apiKey) {
           raw_start: raw.slice(0, 200),
           raw_end: raw.slice(-200),
           parsed_count: parsed.length,
+          lines_detected: meta?.lines_detected ?? null,
           truncated: looksTruncated,
         };
-        console.log(`Chunk ${myIdx + 1}/${chunks.length}: raw=${raw.length} chars, parsed=${parsed.length} txns${looksTruncated ? ' (TRUNCATED)' : ''}. Start: ${raw.slice(0, 100).replace(/\n/g, ' ')}`);
+        const metaStr = meta?.lines_detected != null ? ` [lines_detected=${meta.lines_detected}]` : '';
+        console.log(`Chunk ${myIdx + 1}/${chunks.length}: raw=${raw.length} chars, parsed=${parsed.length} txns${metaStr}${looksTruncated ? ' (TRUNCATED)' : ''}. Start: ${raw.slice(0, 100).replace(/\n/g, ' ')}`);
       } catch (err) {
         console.error(`Chunk ${myIdx + 1} failed:`, err.message);
         errors[myIdx] = err.message;
@@ -426,10 +458,20 @@ async function handleExtract(req, res, apiKey) {
     const count = seen.get(key) || 0;
     if (count < 3) { seen.set(key, count + 1); unique.push(t); }
   }
+  // Aggregate lines_detected across chunks (if Claude reported it)
+  let linesDetected = 0;
+  let claudeReported = false;
+  for (const s of rawSamples) {
+    if (s && typeof s.lines_detected === 'number') {
+      linesDetected += s.lines_detected;
+      claudeReported = true;
+    }
+  }
   const response = {
     transactions: unique, count: unique.length, filename: filename || null,
     chunks_total: chunksTotal, chunks_ok: chunksOk, chunks_failed: chunksFailed,
     text_chars: cleaned.length,
+    lines_detected: claudeReported ? linesDetected : null,
   };
   if (chunksFailed > 0) {
     // Surface the actual underlying error messages so users/devs can diagnose
@@ -469,23 +511,21 @@ async function handleInsight(req, res, apiKey) {
   // Build a compact user-facing summary string for Claude
   const userContent = `Spending summary (${summary.period || 'recent period'}):
 
-Income:        AED ${summary.totals?.income || 0}
-Expenses:      AED ${summary.totals?.expenses || 0}
-Investments:   AED ${summary.totals?.investments || 0}
-Loan/card pmt: AED ${summary.totals?.loans || 0}
-Net surplus:   AED ${(summary.totals?.income || 0) - (summary.totals?.expenses || 0) - (summary.totals?.investments || 0) - (summary.totals?.loans || 0)} over ${summary.months || 1} months
+Income:                 AED ${summary.totals?.income || 0}
+Expenses:               AED ${summary.totals?.expenses || 0}
+Savings & Investments:  AED ${summary.totals?.savings_investments || 0}
+Loan/card payments:     AED ${summary.totals?.loans || 0}
+Net surplus:            AED ${(summary.totals?.income || 0) - (summary.totals?.expenses || 0) - (summary.totals?.savings_investments || 0) - (summary.totals?.loans || 0)} over ${summary.months || 1} months
 
-Top expenses by merchant (${summary.top_merchants?.length || 0}):
+Top expenses by merchant (excludes savings transfers; ${summary.top_merchants?.length || 0}):
 ${(summary.top_merchants || []).slice(0, 15).map(m => `- ${m.merchant}: AED ${m.total} (${m.count}x, ${m.category})`).join('\n')}
 
 Spend by sub-category:
 ${Object.entries(summary.by_sub || {}).map(([k, v]) => `- ${k}: AED ${v}`).join('\n')}
 
-Avoidable spending total: AED ${summary.avoidable_total || 0} across ${summary.avoidable_count || 0} transactions.
-
 ${summary.month_over_month ? `Month-over-month: ${summary.month_over_month}` : ''}
 
-Now write ONE observation per the rules.`;
+Now write ONE observation per the rules. Focus on what's genuinely interesting. Do NOT moralize about whether spending is "avoidable" — the user decides that. Just surface patterns they might not have noticed.`;
 
   try {
     const raw = await callClaude({
