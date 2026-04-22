@@ -190,6 +190,19 @@ html,body{height:100%;font-family:'DM Sans',sans-serif;background:var(--bg);colo
 .scr{display:flex;justify-content:space-between;align-items:center;padding:9px 12px;border-radius:var(--rs);margin-bottom:5px;font-size:13px}
 .scr.main{background:var(--Gl);border:1px solid rgba(26,122,74,.2)}
 .scr.alt{background:var(--bg);border:1px solid var(--b)}
+
+/* Insight card (AI-generated observation) */
+.insight-card{background:linear-gradient(135deg,var(--Gl) 0%,#fff 100%);border:1px solid rgba(26,122,74,.18);border-radius:var(--rs);padding:13px 14px;margin-bottom:12px;position:relative}
+.insight-card.warn{background:linear-gradient(135deg,var(--Ab) 0%,#fff 100%);border-color:rgba(146,96,10,.25)}
+.insight-card.good{background:linear-gradient(135deg,var(--Gl) 0%,#fff 100%);border-color:rgba(26,122,74,.25)}
+.insight-card.loading{background:var(--bg);border-color:var(--b)}
+.insight-card .ins-hd{font-size:13px;line-height:1.45;font-weight:500;color:var(--t);letter-spacing:-.01em}
+.insight-card .ins-dt{font-size:11.5px;color:var(--t2);margin-top:6px;line-height:1.5}
+.insight-card.loading .ins-hd{color:var(--t3);font-weight:400;font-style:italic}
+
+/* Warning banner (persistent file-warnings on dashboard) */
+.wbnr{background:var(--Ab);border:1px solid rgba(146,96,10,.3);border-left:3px solid #c9941a;border-radius:6px;padding:10px 12px;font-size:11.5px;color:#5c3c06;margin-bottom:10px;display:flex;align-items:center;gap:8px;cursor:pointer;line-height:1.4}
+.wbnr:hover{background:#fdf3d9}
 </style>
 </head>
 <body>
@@ -309,6 +322,8 @@ const WORKER_URL = '/api/analyze';
 let files=[], allTxns=[], plData=null;
 let cM='all', cS={all:'list',income:'direct',expenses:'food',invest:'all',loans:'main',pl:'monthly'};
 let activeFilter='all', editingIdx=null;
+let fileWarnings=[]; // persistent: {name, reason, detail, count}
+let insightData=null; // {headline, detail, tone} — null until loaded
 
 // ══ CATEGORY CONFIG ══
 const CATS = {
@@ -434,7 +449,8 @@ async function startAnalysis(){
           all.push(...(d.transactions||[]));
           // Capture partial-success warnings (some chunks failed but others worked)
           if(d.warning){
-            skipped.push({name:files[i].name,reason:'partial',detail:d.warning,count:d.count||0});
+            const detailStr=d.error_details?d.error_details.join(' | '):d.warning;
+            skipped.push({name:files[i].name,reason:'partial',detail:detailStr,count:d.count||0});
           }
           success=true; break;
         }catch(e){
@@ -471,17 +487,22 @@ async function startAnalysis(){
       }
       w.innerHTML=msg;
       document.querySelector('.pc').appendChild(w);
+      // Persist warnings for display in dashboard
+      fileWarnings=skipped.slice();
       await wait(4000);
+    } else {
+      fileWarnings=[];
     }
     if(!all.length){
       throw new Error('No transactions could be extracted. Please check your files and try again.');
     }
     setAct(idx+1);
-    document.getElementById('ph').textContent='Rules applied — review ready';
+    document.getElementById('ph').textContent='Building your dashboard...';
     await wait(400); setDone(idx+1); setAct(idx+2);
     allTxns=all.map((t,i)=>({...t,_id:i,_deleted:false}));
     await wait(300); setDone(idx+2);
-    showReview();
+    // Skip review → go straight to dashboard
+    await buildDashboard();
   }catch(e){
     document.getElementById('perr').style.display='block';
     document.getElementById('perr-msg').textContent=e.message;
@@ -591,7 +612,105 @@ function assignCat(cat,sub){
   const t=allTxns.find(x=>x._id===editingIdx);
   if(t){t.cat=cat;t.sub=sub;}
   closeSheet();
-  renderReview();
+  // Re-render whichever screen is currently showing
+  if(document.getElementById('sd').classList.contains('on')){
+    // On dashboard — recompute totals + re-render
+    const active=allTxns.filter(x=>!x._deleted);
+    plData=computePL(active);
+    refreshDashHeader();
+    renderDash();
+  } else {
+    renderReview();
+  }
+}
+
+// Re-compute totals/counts in header without refetching insight
+function refreshDashHeader(){
+  const active=allTxns.filter(t=>!t._deleted);
+  if(!active.length||!plData) return;
+  const incTot=plData.totals.income, expTot=plData.totals.expenses;
+  const invTot=plData.totals.invest, loanTot=plData.totals.loans;
+  document.getElementById('dpd').textContent=`${plData.period_label.replace(/^Total · /,'')} · ${active.length} transactions`;
+  document.getElementById('dsurp').textContent=`AED ${fmt(plData.surplus_avg)}/mo`;
+  const cnt={
+    all: active.length,
+    income: active.filter(t=>t.cat==='income').length,
+    expenses: active.filter(t=>t.cat==='expenses').length,
+    investments: active.filter(t=>t.cat==='investments').length,
+    loans: active.filter(t=>t.cat==='loans').length,
+  };
+  document.getElementById('mv-a').textContent=''+cnt.all;
+  document.getElementById('mv-i').textContent='AED '+fK(incTot);
+  document.getElementById('mv-e').textContent='AED '+fK(expTot);
+  document.getElementById('mv-v').textContent='AED '+fK(invTot);
+  document.getElementById('mv-l').textContent='AED '+fK(loanTot);
+  document.getElementById('mlbl-i').textContent=`Income · ${cnt.income}`;
+  document.getElementById('mlbl-e').textContent=`Expenses · ${cnt.expenses}`;
+  document.getElementById('mlbl-v').textContent=`Investments · ${cnt.investments}`;
+  document.getElementById('mlbl-l').textContent=`Loans · ${cnt.loans}`;
+}
+
+// Delete from dashboard row
+function dashDelete(id){
+  const t=allTxns.find(x=>x._id===id);
+  if(t) t._deleted=true;
+  const active=allTxns.filter(x=>!x._deleted);
+  if(plData) plData=computePL(active);
+  refreshDashHeader();
+  renderDash();
+}
+
+// Expand/collapse the file-warning banner
+function toggleWarnDetail(){
+  const d=document.getElementById('wbnr-detail');
+  if(d) d.style.display=(d.style.display==='none'||!d.style.display)?'block':'none';
+}
+
+// ══ SUBSCRIPTION DETECTION ══
+// Heuristic: same merchant + amount within ±5% appearing 2+ times with gaps of 20-40 days
+// Returns array of {merchant, count, monthly, total, span, lastDate}
+function detectSubscriptions(txns){
+  const expenses=txns.filter(t=>t.cat==='expenses'&&t.direction==='DR'&&t.date);
+  const byMerchant={};
+  for(const t of expenses){
+    const key=t.merchant||'Unknown';
+    if(!byMerchant[key]) byMerchant[key]=[];
+    byMerchant[key].push(t);
+  }
+  const results=[];
+  for(const [merchant,items] of Object.entries(byMerchant)){
+    if(items.length<2) continue;
+    // Group by similar amounts (within ±10%)
+    items.sort((a,b)=>(a.date||'').localeCompare(b.date||''));
+    // Look for recurring at roughly monthly cadence
+    const amounts=items.map(t=>t.amount);
+    const avgAmt=amounts.reduce((a,b)=>a+b,0)/amounts.length;
+    const allSimilar=amounts.every(a=>Math.abs(a-avgAmt)/avgAmt<0.15);
+    if(!allSimilar) continue;
+    // Check gap distribution: at least half should be 20-40 day gaps
+    const gaps=[];
+    for(let i=1;i<items.length;i++){
+      const d1=new Date(items[i-1].date), d2=new Date(items[i].date);
+      gaps.push(Math.round((d2-d1)/(1000*60*60*24)));
+    }
+    const monthlyGaps=gaps.filter(g=>g>=20&&g<=40).length;
+    const weeklyGaps=gaps.filter(g=>g>=5&&g<=10).length;
+    const isRecurring=(monthlyGaps/gaps.length>=0.5)||(weeklyGaps/gaps.length>=0.5&&items.length>=4);
+    if(!isRecurring) continue;
+    const total=items.reduce((a,t)=>a+t.amount,0);
+    const firstD=new Date(items[0].date), lastD=new Date(items[items.length-1].date);
+    const daysSpan=Math.max(1,(lastD-firstD)/(1000*60*60*24));
+    const monthsSpan=daysSpan/30;
+    const monthly=monthsSpan>0?total/Math.max(monthsSpan,1):avgAmt;
+    results.push({
+      merchant, count: items.length,
+      monthly: Math.round(monthly),
+      total: Math.round(total),
+      span: monthsSpan>=1?`${Math.round(monthsSpan)} mo`:`${Math.round(daysSpan)} days`,
+      lastDate: items[items.length-1].date,
+    });
+  }
+  return results.sort((a,b)=>b.monthly-a.monthly);
 }
 
 function closeSheet(e){
@@ -639,7 +758,101 @@ async function buildDashboard(){
   cM='all'; cS.all='list';
   document.querySelectorAll('[id^=sb-]').forEach(sb=>sb.style.display='none');
   document.getElementById('sb-all').style.display='flex';
+  // Render once with no insight, then re-render when insight arrives
+  insightData=null;
   renderDash();
+  fetchInsight(active).then(ins=>{
+    insightData=ins;
+    renderDash();
+  }).catch(err=>{
+    console.warn('Insight fetch failed:',err);
+    insightData={headline:null};
+    renderDash();
+  });
+}
+
+// ══ INSIGHT FETCH — call API with summarized data ══
+async function fetchInsight(active){
+  // Build a compact summary for Claude
+  const totals={
+    income: Math.round(active.filter(t=>t.cat==='income').reduce((a,t)=>a+t.amount,0)),
+    expenses: Math.round(active.filter(t=>t.cat==='expenses').reduce((a,t)=>a+t.amount,0)),
+    investments: Math.round(active.filter(t=>t.cat==='investments').reduce((a,t)=>a+t.amount,0)),
+    loans: Math.round(active.filter(t=>t.cat==='loans').reduce((a,t)=>a+t.amount,0)),
+  };
+  // Top merchants (expenses only)
+  const mg={};
+  for(const t of active.filter(t=>t.cat==='expenses')){
+    const k=t.merchant||'Unknown';
+    if(!mg[k])mg[k]={total:0,count:0,category:t.sub};
+    mg[k].total+=t.amount; mg[k].count+=1;
+  }
+  const top_merchants=Object.entries(mg)
+    .map(([merchant,v])=>({merchant,total:Math.round(v.total),count:v.count,category:v.category}))
+    .sort((a,b)=>b.total-a.total).slice(0,15);
+  // By sub-category
+  const by_sub={};
+  for(const t of active.filter(t=>t.cat==='expenses')){
+    by_sub[t.sub]=(by_sub[t.sub]||0)+t.amount;
+  }
+  Object.keys(by_sub).forEach(k=>by_sub[k]=Math.round(by_sub[k]));
+  // Avoidable
+  const avoidable=active.filter(t=>t.avoidable);
+  const avoidable_total=Math.round(avoidable.reduce((a,t)=>a+t.amount,0));
+  // Month-over-month (only if >1 month)
+  let mom='';
+  if(plData.pl_months.length>1){
+    const last=plData.pl_months[plData.pl_months.length-1];
+    const prev=plData.pl_months[plData.pl_months.length-2];
+    const delta=last.exp-prev.exp;
+    const pct=prev.exp?Math.round((delta/prev.exp)*100):0;
+    mom=`Expenses in ${last.m}: AED ${last.exp} vs ${prev.m}: AED ${prev.exp} (${pct>=0?'+':''}${pct}%)`;
+  }
+  const summary={
+    period: plData.period_label.replace(/^Total · /,''),
+    months: plData.months,
+    totals, top_merchants, by_sub,
+    avoidable_total, avoidable_count: avoidable.length,
+    month_over_month: mom,
+  };
+  const res=await fetch(WORKER_URL,{
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({action:'insight',summary}),
+  });
+  if(!res.ok) throw new Error('insight http '+res.status);
+  return await res.json();
+}
+
+// ══ PAIRED CARD PAYMENT NETTING ══
+// Detects DR/CR pairs on the Loans tab (same amount, within ±3 days) that represent
+// the same real transaction captured from two statements. Returns an annotated list.
+function netCardPayments(loansTxns){
+  const rows=[...loansTxns];
+  const pairs=[]; // array of [drIdx, crIdx]
+  const used=new Set();
+  for(let i=0;i<rows.length;i++){
+    if(used.has(i)) continue;
+    const a=rows[i];
+    if(a.type!=='card_payment' && a.type!=='card_payment_received') continue;
+    for(let j=i+1;j<rows.length;j++){
+      if(used.has(j)) continue;
+      const b=rows[j];
+      if(b.type!=='card_payment' && b.type!=='card_payment_received') continue;
+      // Must be opposite directions, matching amount, within 3 days
+      if(a.direction===b.direction) continue;
+      if(Math.abs(a.amount-b.amount)>1) continue;
+      const d1=new Date(a.date), d2=new Date(b.date);
+      const days=Math.abs((d1-d2)/(1000*60*60*24));
+      if(days>3) continue;
+      pairs.push([i,j]); used.add(i); used.add(j); break;
+    }
+  }
+  // Mark paired items
+  return rows.map((r,i)=>{
+    const pair=pairs.find(p=>p.includes(i));
+    return {...r, _paired: !!pair};
+  });
 }
 
 function computePL(txns){
@@ -695,37 +908,82 @@ function renderDash(){
     for(const t of arr){const k=t.merchant||'Unknown';if(!g[k])g[k]={amt:0,freq:t.freq,note:t.note,avoidable:t.avoidable};g[k].amt+=Number(t.amount)||0;}
     return Object.entries(g).sort(([,a],[,b])=>b.amt-a.amt).map(([n,v])=>({n,s:'',f:v.freq,a:v.amt,avoidable:v.avoidable,note:v.note}));
   }
+  // Interactive row — tap merchant to reassign, × to delete
+  function irx(t){
+    const color=t.direction==='CR'?'G':(t.cat==='loans'?'B':(t.cat==='investments'?'B':'R'));
+    const sign=t.direction==='CR'?'+':'−';
+    const dateStr=(t.date||'').slice(5).replace('-','/');
+    const catInfo=CATS[t.cat];
+    const catLbl=catInfo?catInfo.label:t.cat;
+    const subLbl=t.type&&t.type!=='other'?' · '+t.type.replace(/_/g,' '):'';
+    const pairedBadge=t._paired?'<span style="font-size:9px;background:#e8eef5;color:#3e5676;border-radius:4px;padding:1px 5px;margin-left:6px">paired</span>':'';
+    return `<div class="ir" id="dr-${t._id}">
+      <div class="il" style="cursor:pointer" onclick="openSheet(${t._id})">
+        <div class="inm">${t.merchant}${pairedBadge}</div>
+        <div class="is">${dateStr} · ${catLbl}${subLbl}</div>
+      </div>
+      <div class="ira" style="display:flex;align-items:center;gap:8px">
+        <div class="ia c${color}">${sign}AED ${fmt(t.amount)}</div>
+        <div onclick="dashDelete(${t._id})" style="cursor:pointer;color:var(--t3);font-size:15px;padding:4px 2px;line-height:1" title="Remove">×</div>
+      </div>
+    </div>`;
+  }
+
+  // ─── Persistent warning banner (if any files had issues) ───
+  if(fileWarnings && fileWarnings.length){
+    const byType=fileWarnings.reduce((a,w)=>{a[w.reason]=(a[w.reason]||0)+1;return a;},{});
+    const parts=[];
+    if(byType.timeout||byType.toolarge) parts.push(`${byType.timeout||byType.toolarge} file${(byType.timeout||byType.toolarge)>1?'s':''} too large`);
+    if(byType.partial) parts.push(`${byType.partial} file${byType.partial>1?'s':''} partially processed`);
+    if(byType.error) parts.push(`${byType.error} file${byType.error>1?'s':''} failed`);
+    h+=`<div class="wbnr" onclick="toggleWarnDetail()" id="wbnr">
+      <div style="flex:1">⚠ ${parts.join(' · ')} — data may be incomplete. Tap for details.</div>
+      <div style="color:var(--t3);font-size:10px">▼</div>
+    </div>
+    <div id="wbnr-detail" style="display:none;background:#fef9ec;border-left:3px solid #c9941a;padding:10px 12px;font-size:11px;color:#5c3c06;margin-bottom:10px;border-radius:0 6px 6px 0;line-height:1.7">
+      ${fileWarnings.map(w=>`· <strong>${w.name}</strong>${w.detail?' — '+w.detail.slice(0,120):''}`).join('<br>')}
+      <br><br>📄 <strong>Tip:</strong> split large PDFs using <a href="https://smallpdf.com/split-pdf" target="_blank" style="color:#92600a;font-weight:600">smallpdf.com/split-pdf</a> and re-upload.
+    </div>`;
+  }
+
+  // ─── Insight card (Claude-generated, one per session) ───
+  if(insightData===null){
+    h+=`<div class="insight-card loading">
+      <div class="ins-hd">💡 Finding a pattern…</div>
+    </div>`;
+  } else if(insightData&&insightData.headline){
+    const toneCls=insightData.tone==='warning'?'warn':(insightData.tone==='encouraging'?'good':'');
+    h+=`<div class="insight-card ${toneCls}">
+      <div class="ins-hd">${insightData.headline}</div>
+      ${insightData.detail?`<div class="ins-dt">${insightData.detail}</div>`:''}
+    </div>`;
+  }
 
   if(m==='all'){
-    // All transactions view — chronological list, colored by category
+    // All transactions view — chronological, interactive rows
     const sorted=[...txns].sort((a,b)=>(b.date||'').localeCompare(a.date||''));
     const totCr=txns.filter(t=>t.direction==='CR').reduce((a,t)=>a+(Number(t.amount)||0),0);
     const totDr=txns.filter(t=>t.direction==='DR').reduce((a,t)=>a+(Number(t.amount)||0),0);
     h+=stats2([{l:d.period_label||'All',v:''+txns.length+' txns',c:''},{l:'Money in',v:'AED '+fmt(totCr),c:'G'},{l:'Money out',v:'AED '+fmt(totDr),c:'R'}]);
-    h+=secl('All transactions (newest first)');
+    h+=secl('All transactions (newest first) · tap to reassign · × to delete');
     h+=`<div class="ig">`;
     if(!sorted.length){h+=`<div style="padding:14px 0;text-align:center;font-size:12px;color:var(--t3)">No transactions</div>`;}
-    sorted.forEach(t=>{
-      const catInfo=CATS[t.cat]; const catCls=catInfo?catInfo.color:'';
-      const color=t.direction==='CR'?'G':(t.cat==='loans'?'B':(t.cat==='investments'?'B':'R'));
-      const sign=t.direction==='CR'?'+':'−';
-      const dateStr=(t.date||'').slice(5).replace('-','/');
-      const catLbl=catInfo?catInfo.label:t.cat;
-      h+=ir(`${t.merchant}`,`${dateStr} · ${catLbl}${t.type&&t.type!=='other'?' · '+t.type.replace(/_/g,' '):''}`,'',`${sign}AED ${fmt(t.amount)}`,color,'');
-    });
+    sorted.forEach(t=>{h+=irx(t);});
     h+=`</div>`;
   }
   else if(m==='income'){
     const direct=catTxns('income','direct'), indirect=catTxns('income','indirect');
     if(s==='direct'){
       h+=stats2([{l:'Total',v:'AED '+fmt(sumAmt(direct)),c:'G'},{l:'Monthly avg',v:'AED '+fmt(Math.round(sumAmt(direct)/d.months))},{l:'Months',v:''+d.months}]);
-      h+=secl('By source');h+=`<div class="ig">`;
-      groupMerchant(direct).forEach(it=>{h+=ir(it.n,it.note||'',ftg(it.f),'AED '+fmt(it.a),'G','');});
+      h+=secl('Direct income · tap to reassign · × to delete');h+=`<div class="ig">`;
+      if(!direct.length) h+=`<div style="padding:14px 0;text-align:center;font-size:12px;color:var(--t3)">No transactions</div>`;
+      direct.sort((a,b)=>(b.date||'').localeCompare(a.date||'')).forEach(t=>{h+=irx(t);});
       h+=`</div>`;
     }else{
       h+=stats2([{l:'Total',v:'AED '+fmt(sumAmt(indirect)),c:'G'},{l:'Transactions',v:''+indirect.length}]);
-      h+=secl('Indirect income');h+=`<div class="ig">`;
-      groupMerchant(indirect).forEach(it=>{h+=ir(it.n,'',ftg(it.f),'AED '+fmt(it.a),'G','');});
+      h+=secl('Indirect income · tap to reassign · × to delete');h+=`<div class="ig">`;
+      if(!indirect.length) h+=`<div style="padding:14px 0;text-align:center;font-size:12px;color:var(--t3)">No transactions</div>`;
+      indirect.sort((a,b)=>(b.date||'').localeCompare(a.date||'')).forEach(t=>{h+=irx(t);});
       h+=`</div>`;
     }
   }
@@ -735,31 +993,57 @@ function renderDash(){
     const tot=sumAmt(txnsInSub);
     const avoidable=txnsInSub.filter(t=>t.avoidable);
     h+=stats2([{l:d.period_label||'Total',v:'AED '+fmt(tot),c:'R'},{l:'Monthly avg',v:'AED '+fmt(Math.round(tot/d.months))},{l:'Transactions',v:''+txnsInSub.length}]);
-    if(avoidable.length){
-      h+=secl('Avoidable charges');
-      avoidable.forEach(t=>{h+=`<div class="flg"><div class="flt">${t.merchant} — AED ${fmt(t.amount)}</div>${t.flag||'Avoidable charge'}</div>`;});
+    // Subscription audit — shown only in Misc tab
+    if(sub==='misc'){
+      const subs=detectSubscriptions(txns);
+      if(subs.length){
+        const subsTotal=subs.reduce((a,s)=>a+s.monthly,0);
+        h+=secl(`🔁 Recurring subscriptions · ~AED ${fmt(subsTotal)}/mo total`);
+        h+=`<div class="ig">`;
+        subs.forEach(sub=>{
+          h+=`<div class="ir"><div class="il"><div class="inm">${sub.merchant}</div><div class="is">${sub.count}× over ${sub.span} · ~AED ${fmt(sub.monthly)}/mo · last ${sub.lastDate}</div></div><div class="ira"><div class="ia cR">AED ${fmt(sub.total)}</div><div class="ip">total</div></div></div>`;
+        });
+        h+=`</div>`;
+      }
     }
-    h+=secl(`${CATS.expenses.subs[sub]||sub} breakdown`);
+    if(avoidable.length){
+      h+=secl(`Avoidable charges · AED ${fmt(sumAmt(avoidable))} total`);
+      h+=`<div class="ig">`;
+      avoidable.sort((a,b)=>b.amount-a.amount).forEach(t=>{h+=irx(t);});
+      h+=`</div>`;
+    }
+    h+=secl(`${CATS.expenses.subs[sub]||sub} · tap to reassign · × to delete`);
     h+=`<div class="ig">`;
-    groupMerchant(txnsInSub.filter(t=>!t.avoidable)).forEach(it=>{h+=ir(it.n,it.note||'',ftg(it.f),'AED '+fmt(it.a),'','');});
-    if(!txnsInSub.filter(t=>!t.avoidable).length) h+=`<div style="padding:14px 0;text-align:center;font-size:12px;color:var(--t3)">No transactions</div>`;
+    const nonAvoid=txnsInSub.filter(t=>!t.avoidable).sort((a,b)=>(b.date||'').localeCompare(a.date||''));
+    nonAvoid.forEach(t=>{h+=irx(t);});
+    if(!nonAvoid.length) h+=`<div style="padding:14px 0;text-align:center;font-size:12px;color:var(--t3)">No transactions</div>`;
     h+=`</div>`;
   }
   else if(m==='invest'){
     const inv=catTxns('investments');
     const tot=sumAmt(inv);
     h+=stats2([{l:d.period_label||'Total',v:'AED '+fmt(tot),c:'B'},{l:'Monthly avg',v:'AED '+fmt(Math.round(tot/d.months))},{l:'Plans',v:''+new Set(inv.map(t=>t.merchant)).size}]);
-    h+=secl('Investment plans');h+=`<div class="ig">`;
-    groupMerchant(inv).forEach(it=>{h+=ir(it.n,it.note||'',ftg(it.f),'AED '+fmt(it.a),'B','');});
+    h+=secl('Investments · tap to reassign · × to delete');h+=`<div class="ig">`;
+    if(!inv.length) h+=`<div style="padding:14px 0;text-align:center;font-size:12px;color:var(--t3)">No transactions</div>`;
+    inv.sort((a,b)=>(b.date||'').localeCompare(a.date||'')).forEach(t=>{h+=irx(t);});
     h+=`</div>`;
   }
   else if(m==='loans'){
-    const loans=catTxns('loans');
+    const loansRaw=catTxns('loans');
+    const loans=netCardPayments(loansRaw);
+    const pairedCount=loans.filter(t=>t._paired).length;
     const tot=sumAmt(loans);
+    const drTot=loans.filter(t=>t.direction==='DR').reduce((a,t)=>a+t.amount,0);
+    const crTot=loans.filter(t=>t.direction==='CR').reduce((a,t)=>a+t.amount,0);
     const salaryMonthly=d.totals.income/(d.months||1)||1;
-    h+=stats2([{l:d.period_label||'Total',v:'AED '+fmt(tot),c:'B'},{l:'Monthly',v:'AED '+fmt(Math.round(tot/d.months))},{l:'% income',v:Math.round(tot/d.months/salaryMonthly*100)+'%'}]);
-    h+=secl('Loan repayments');h+=`<div class="ig">`;
-    groupMerchant(loans).forEach(it=>{h+=ir(it.n,'',ftg('monthly'),'AED '+fmt(it.a/d.months),'B','/mo');});
+    h+=stats2([{l:d.period_label||'Total',v:'AED '+fmt(drTot),c:'B'},{l:'Monthly',v:'AED '+fmt(Math.round(drTot/d.months))},{l:'% income',v:Math.round(drTot/d.months/salaryMonthly*100)+'%'}]);
+    if(pairedCount>0){
+      h+=`<div class="ins iG" style="font-size:11px">ℹ ${pairedCount/2} payment${pairedCount/2>1?'s':''} appear on both a bank statement (debit) and a credit-card statement (credit) — marked "paired". The net cash-flow impact is only the debit side.</div>`;
+    }
+    h+=secl('Payments · tap to reassign · × to delete');
+    h+=`<div class="ig">`;
+    if(!loans.length) h+=`<div style="padding:14px 0;text-align:center;font-size:12px;color:var(--t3)">No transactions</div>`;
+    loans.sort((a,b)=>(b.date||'').localeCompare(a.date||'')).forEach(t=>{h+=irx(t);});
     h+=`</div>`;
   }
   else if(m==='pl'){
