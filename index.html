@@ -220,13 +220,27 @@ html,body{height:100%;font-family:'DM Sans',sans-serif;background:var(--bg);colo
 .bba-ghost{background:transparent;color:rgba(255,255,255,.7)}
 .bba-ghost:hover{background:rgba(255,255,255,.1);color:#fff}
 
-/* Undo banner (slides up after delete) */
-.undo-bnr{position:fixed;left:50%;bottom:20px;transform:translateX(-50%) translateY(120%);background:var(--t);color:#fff;border-radius:999px;padding:10px 8px 10px 18px;display:flex;align-items:center;gap:10px;box-shadow:0 8px 24px rgba(0,0,0,.25);font-size:13px;transition:transform .2s cubic-bezier(.4,0,.2,1);z-index:999;max-width:calc(100vw - 32px)}
-.undo-bnr.on{transform:translateX(-50%) translateY(0)}
-.undo-btn{background:transparent;color:#7fc59c;border:none;font-weight:600;font-size:13px;cursor:pointer;font-family:inherit;padding:4px 10px;border-radius:6px}
-.undo-btn:hover{background:rgba(127,197,156,.15)}
-.undo-x{background:transparent;border:none;color:rgba(255,255,255,.5);font-size:18px;cursor:pointer;padding:0 8px;line-height:1}
-.undo-x:hover{color:#fff}
+/* Recycle toast (brief notification after delete) */
+.recycle-toast{position:fixed;left:50%;bottom:20px;transform:translateX(-50%) translateY(120%);background:var(--t);color:#fff;border-radius:999px;padding:10px 18px;display:flex;align-items:center;gap:10px;box-shadow:0 8px 24px rgba(0,0,0,.25);font-size:12px;transition:transform .2s cubic-bezier(.4,0,.2,1);z-index:999;max-width:calc(100vw - 32px)}
+.recycle-toast.on{transform:translateX(-50%) translateY(0)}
+.recycle-toast-ic{font-size:14px;opacity:.7}
+/* Recycle bin rows */
+.recycle-row{display:flex;align-items:center;gap:10px;padding:9px 12px;border-bottom:1px solid var(--b);background:var(--s)}
+.recycle-row:last-child{border-bottom:none}
+.recycle-restore{background:var(--Gb);color:var(--G);border:1px solid rgba(26,122,74,.2);border-radius:6px;padding:4px 10px;font-size:11px;font-weight:600;cursor:pointer;font-family:inherit;white-space:nowrap}
+.recycle-restore:hover{background:#d4eadd}
+.recycle-actions{display:flex;gap:8px;margin-bottom:10px;justify-content:flex-end}
+.recycle-action-btn{background:var(--bg);color:var(--t2);border:1px solid var(--bm);border-radius:6px;padding:6px 12px;font-size:11px;font-weight:500;cursor:pointer;font-family:inherit}
+.recycle-action-btn:hover{background:var(--s);color:var(--t)}
+/* Monthly timeline strip */
+.mt-strip{display:flex;gap:4px;margin:6px 0 4px;overflow-x:auto;scrollbar-width:none;padding-bottom:2px}
+.mt-strip::-webkit-scrollbar{display:none}
+.mt-cell{flex:0 0 auto;min-width:52px;padding:6px 8px;background:var(--bg);border:1px solid var(--b);border-radius:6px;text-align:center}
+.mt-cell-m{font-size:9px;font-weight:600;color:var(--t3);text-transform:uppercase;letter-spacing:.04em}
+.mt-cell-v{font-size:11px;font-weight:600;color:var(--t);margin-top:1px}
+.mt-cell.zero .mt-cell-v{color:var(--t3);font-weight:400}
+/* Self-transfer flag badge on rows */
+.stf-badge{display:inline-flex;align-items:center;font-size:9px;font-weight:600;background:var(--Bb);color:var(--B);border:1px solid rgba(26,78,138,.15);border-radius:10px;padding:1px 6px;margin-left:6px;cursor:help;white-space:nowrap}
 </style>
 </head>
 <body>
@@ -286,7 +300,7 @@ html,body{height:100%;font-family:'DM Sans',sans-serif;background:var(--bg);colo
     <div class="rfilt on" data-f="all" onclick="filterReview('all',this)">All</div>
     <div class="rfilt" data-f="income" onclick="filterReview('income',this)">Income</div>
     <div class="rfilt" data-f="expenses" onclick="filterReview('expenses',this)">Expenses</div>
-    <div class="rfilt" data-f="investments" onclick="filterReview('investments',this)">Investments</div>
+    <div class="rfilt" data-f="savings_investments" onclick="filterReview('savings_investments',this)">Savings</div>
     <div class="rfilt" data-f="loans" onclick="filterReview('loans',this)">Loans</div>
     <div class="rfilt" data-f="unknown" onclick="filterReview('unknown',this)">Unmatched</div>
   </div>
@@ -325,17 +339,19 @@ html,body{height:100%;font-family:'DM Sans',sans-serif;background:var(--bg);colo
       <div class="mt on" onclick="sM('all',this)"><div class="mv" id="mv-a">—</div><div class="mlbl" id="mlbl-a">All</div></div>
       <div class="mt" onclick="sM('income',this)"><div class="mv" id="mv-i">—</div><div class="mlbl" id="mlbl-i">Income</div></div>
       <div class="mt" onclick="sM('expenses',this)"><div class="mv" id="mv-e">—</div><div class="mlbl" id="mlbl-e">Expenses</div></div>
-      <div class="mt" onclick="sM('invest',this)"><div class="mv" id="mv-v">—</div><div class="mlbl" id="mlbl-v">Investments</div></div>
+      <div class="mt" onclick="sM('savings_investments',this)"><div class="mv" id="mv-v">—</div><div class="mlbl" id="mlbl-v">Savings</div></div>
       <div class="mt" onclick="sM('loans',this)"><div class="mv" id="mv-l">—</div><div class="mlbl" id="mlbl-l">Loans</div></div>
       <div class="mt" onclick="sM('pl',this)"><div class="mv">P&amp;L</div><div class="mlbl">Summary</div></div>
+      <div class="mt" id="mt-recycle" onclick="sM('recycle',this)" style="display:none"><div class="mv" id="mv-r">—</div><div class="mlbl">Recycle</div></div>
     </div>
   </div>
   <div id="sb-all" class="sb" style="display:none"><div class="stab on" onclick="sS('all','list',this)">All transactions</div></div>
   <div id="sb-income" class="sb" style="display:none"><div class="stab on" onclick="sS('income','direct',this)">Direct</div><div class="stab" onclick="sS('income','indirect',this)">Indirect</div></div>
   <div id="sb-expenses" class="sb" style="display:none"><div class="stab on" onclick="sS('expenses','food',this)">Food</div><div class="stab" onclick="sS('expenses','shelter',this)">Shelter</div><div class="stab" onclick="sS('expenses','fees',this)">Fees</div><div class="stab" onclick="sS('expenses','transport',this)">Transport</div><div class="stab" onclick="sS('expenses','misc',this)">Misc</div></div>
-  <div id="sb-invest" class="sb" style="display:none"><div class="stab on" onclick="sS('invest','all',this)">All plans</div></div>
+  <div id="sb-savings_investments" class="sb" style="display:none"><div class="stab on" onclick="sS('savings_investments','liquid',this)">Liquid / savings</div><div class="stab" onclick="sS('savings_investments','committed',this)">Committed / growth</div></div>
   <div id="sb-loans" class="sb" style="display:none"><div class="stab on" onclick="sS('loans','main',this)">Both loans</div></div>
   <div id="sb-pl" class="sb" style="display:none"><div class="stab on" onclick="sS('pl','monthly',this)">Monthly</div><div class="stab" onclick="sS('pl','avg',this)">Averages</div></div>
+  <div id="sb-recycle" class="sb" style="display:none"><div class="stab on" onclick="sS('recycle','bin',this)">Deleted transactions</div></div>
   <div class="db" id="db"></div>
   <!-- Bulk action bar (sticks to bottom when bulk mode + selection active) -->
   <div id="bulk-bar" class="bulk-bar">
@@ -344,11 +360,10 @@ html,body{height:100%;font-family:'DM Sans',sans-serif;background:var(--bg);colo
     <button class="bba bba-del" onclick="bulkDelete()">Delete</button>
     <button class="bba bba-ghost" onclick="bulkClear()">Clear</button>
   </div>
-  <!-- Undo banner (slides up from bottom after delete) -->
-  <div id="undo-bnr" class="undo-bnr">
-    <span id="undo-bnr-lbl">Deleted 1 transaction</span>
-    <button class="undo-btn" onclick="undoLastDelete()">Undo</button>
-    <button class="undo-x" onclick="hideUndoBanner()" aria-label="dismiss">×</button>
+  <!-- Recycle bin toast (brief confirmation after delete) -->
+  <div id="recycle-toast" class="recycle-toast">
+    <span class="recycle-toast-ic">🗑</span>
+    <span id="recycle-toast-lbl">1 transaction moved to recycle bin</span>
   </div>
 </div>
 
@@ -358,25 +373,28 @@ const WORKER_URL = '/api/analyze';
 
 // ══ STATE ══
 let files=[], allTxns=[], plData=null;
-let cM='all', cS={all:'list',income:'direct',expenses:'food',invest:'all',loans:'main',pl:'monthly'};
+let cM='all', cS={all:'list',income:'direct',expenses:'food',savings_investments:'liquid',loans:'main',pl:'monthly',recycle:'bin'};
 let activeFilter='all', editingIdx=null;
 let fileWarnings=[]; // persistent: {name, reason, detail, count}
 let fileStats=[]; // persistent: {name, extracted, estimated, textChars, source} per successfully-processed file
 let insightData=null; // {headline, detail, tone} — null until loaded
-// Undo state: stack of recently-deleted txn snapshots (capped, LIFO)
-let deletedStack=[]; // [{t: txn snapshot, ts: when}]
-let undoTimer=null;
+// Coverage: Claude's self-reported count of transaction-like lines vs what we extracted
+let linesDetected=null; // total Claude identified across all chunks
+// Recycle bin state: replaces undo. Delete moves to recycle; user restores from Recycle tab.
+let toastTimer=null;
 // Bulk-select state
 let bulkMode=false;
 let bulkSelected=new Set(); // _id's of selected txns
 
 // ══ CATEGORY CONFIG ══
 const CATS = {
-  income:      { label:'Income',      color:'cat-income',      subs:{ direct:'Direct income', indirect:'Indirect / other' } },
-  expenses:    { label:'Expenses',    color:'cat-expenses',    subs:{ food:'Food & dining', shelter:'Shelter / rent', fees:'Fees & education', transport:'Transport', misc:'Miscellaneous' } },
-  investments: { label:'Investments', color:'cat-investments', subs:{ all:'Investments' } },
-  loans:       { label:'Loans',       color:'cat-loans',       subs:{ main:'Loan repayments' } },
+  income:              { label:'Income',              color:'cat-income',      subs:{ direct:'Direct income', indirect:'Indirect / other' } },
+  expenses:            { label:'Expenses',            color:'cat-expenses',    subs:{ food:'Food & dining', shelter:'Shelter / rent', fees:'Fees & education', transport:'Transport', misc:'Miscellaneous' } },
+  savings_investments: { label:'Savings & Investments', color:'cat-investments', subs:{ liquid:'Liquid / savings', committed:'Committed / growth' } },
+  loans:               { label:'Loans',               color:'cat-loans',       subs:{ main:'Loan repayments' } },
 };
+// Migrate any incoming "investments" tagged txns from older API responses
+function migrateCat(t){ if(t.cat==='investments'){ t.cat='savings_investments'; if(!t.sub||t.sub==='all') t.sub='committed'; } return t; }
 
 // ══ BUILT-IN DEMO DATA ══
 // (same DEMO object as before — truncated here for brevity; runtime uses pre-categorised transactions)
@@ -389,29 +407,29 @@ const DEMO_TXNS = [
   {date:'2025-10-25',merchant:'Lulu Hypermarket',amount:180,type:'debit',cat:'expenses',sub:'food',type:'supermarket',freq:'monthly'},
   {date:'2025-10-28',merchant:'Installment Recovery 559R',amount:4332.93,type:'debit',cat:'loans',sub:'main',type:'personal_loan',freq:'monthly'},
   {date:'2025-11-03',merchant:'Installment ref 1639',amount:1639,type:'debit',cat:'loans',sub:'main',type:'car_loan',freq:'monthly'},
-  {date:'2025-11-10',merchant:'Zurich Intl Life Ltd',amount:559.89,type:'debit',cat:'investments',sub:'all',type:'life_insurance',freq:'monthly'},
-  {date:'2025-11-12',merchant:'Glomo Dubai AE',amount:1101.75,type:'debit',cat:'investments',sub:'all',type:'insurance_usd',freq:'monthly',note:'Policy Bazaar USD $300/mo'},
+  {date:'2025-11-10',merchant:'Zurich Intl Life Ltd',amount:559.89,type:'debit',cat:'savings_investments',sub:'committed',type:'life_insurance',freq:'monthly'},
+  {date:'2025-11-12',merchant:'Glomo Dubai AE',amount:1101.75,type:'debit',cat:'savings_investments',sub:'committed',type:'insurance_usd',freq:'monthly',note:'Policy Bazaar USD $300/mo'},
   {date:'2025-11-15',merchant:'Salary Payment',amount:30000,type:'credit',cat:'income',sub:'direct',type:'salary',freq:'monthly'},
   {date:'2025-11-20',merchant:'Waitrose Supermarket',amount:145,type:'debit',cat:'expenses',sub:'food',type:'supermarket',freq:'monthly'},
   {date:'2025-11-26',merchant:'Rita Towers rent',amount:9250,type:'debit',cat:'expenses',sub:'shelter',type:'rent',freq:'quarterly'},
-  {date:'2025-11-30',merchant:'Abu Dhabi Police',amount:206,type:'debit',cat:'expenses',sub:'misc',type:'traffic_fine',freq:'adhoc',avoidable:true,flag:'Traffic fine — avoidable'},
-  {date:'2025-12-10',merchant:'Zurich Intl Life Ltd',amount:559.89,type:'debit',cat:'investments',sub:'all',type:'life_insurance',freq:'monthly'},
+  {date:'2025-11-30',merchant:'Abu Dhabi Police',amount:206,type:'debit',cat:'expenses',sub:'misc',type:'traffic_fine',freq:'adhoc'},
+  {date:'2025-12-10',merchant:'Zurich Intl Life Ltd',amount:559.89,type:'debit',cat:'savings_investments',sub:'committed',type:'life_insurance',freq:'monthly'},
   {date:'2025-12-15',merchant:'Salary Payment',amount:30750,type:'credit',cat:'income',sub:'direct',type:'salary',freq:'monthly'},
-  {date:'2025-12-25',merchant:'Policy Bazaar Gurgaon',amount:1904.13,type:'debit',cat:'investments',sub:'all',type:'insurance_inr',freq:'quarterly'},
+  {date:'2025-12-25',merchant:'Policy Bazaar Gurgaon',amount:1904.13,type:'debit',cat:'savings_investments',sub:'committed',type:'insurance_inr',freq:'quarterly'},
   {date:'2026-01-05',merchant:'GEMS United Indian School',amount:2096.25,type:'debit',cat:'expenses',sub:'fees',type:'school_tuition',freq:'monthly'},
-  {date:'2026-01-10',merchant:'Zurich Intl Life Ltd',amount:559.89,type:'debit',cat:'investments',sub:'all',type:'life_insurance',freq:'monthly'},
-  {date:'2026-01-12',merchant:'Glomo Dubai AE',amount:1101.75,type:'debit',cat:'investments',sub:'all',type:'insurance_usd',freq:'monthly',note:'Policy Bazaar USD $300/mo'},
+  {date:'2026-01-10',merchant:'Zurich Intl Life Ltd',amount:559.89,type:'debit',cat:'savings_investments',sub:'committed',type:'life_insurance',freq:'monthly'},
+  {date:'2026-01-12',merchant:'Glomo Dubai AE',amount:1101.75,type:'debit',cat:'savings_investments',sub:'committed',type:'insurance_usd',freq:'monthly',note:'Policy Bazaar USD $300/mo'},
   {date:'2026-01-15',merchant:'Salary Payment',amount:30250,type:'credit',cat:'income',sub:'direct',type:'salary',freq:'monthly'},
-  {date:'2026-01-16',merchant:'Abu Dhabi Police',amount:981,type:'debit',cat:'expenses',sub:'misc',type:'traffic_fine',freq:'adhoc',avoidable:true,flag:'Traffic fine — avoidable'},
-  {date:'2026-02-10',merchant:'Zurich Intl Life Ltd',amount:559.89,type:'debit',cat:'investments',sub:'all',type:'life_insurance',freq:'monthly'},
+  {date:'2026-01-16',merchant:'Abu Dhabi Police',amount:981,type:'debit',cat:'expenses',sub:'misc',type:'traffic_fine',freq:'adhoc'},
+  {date:'2026-02-10',merchant:'Zurich Intl Life Ltd',amount:559.89,type:'debit',cat:'savings_investments',sub:'committed',type:'life_insurance',freq:'monthly'},
   {date:'2026-02-15',merchant:'Salary Payment',amount:31580,type:'credit',cat:'income',sub:'direct',type:'salary',freq:'monthly'},
   {date:'2026-02-20',merchant:'Talabat PostPaid',amount:620,type:'debit',cat:'expenses',sub:'food',type:'delivery',freq:'monthly'},
-  {date:'2026-03-10',merchant:'Zurich Intl Life Ltd',amount:559.89,type:'debit',cat:'investments',sub:'all',type:'life_insurance',freq:'monthly'},
+  {date:'2026-03-10',merchant:'Zurich Intl Life Ltd',amount:559.89,type:'debit',cat:'savings_investments',sub:'committed',type:'life_insurance',freq:'monthly'},
   {date:'2026-03-15',merchant:'Salary Payment',amount:33575,type:'credit',cat:'income',sub:'direct',type:'salary',freq:'monthly'},
-  {date:'2026-03-25',merchant:'Policy Bazaar Gurgaon',amount:1816.80,type:'debit',cat:'investments',sub:'all',type:'insurance_inr',freq:'quarterly'},
+  {date:'2026-03-25',merchant:'Policy Bazaar Gurgaon',amount:1816.80,type:'debit',cat:'savings_investments',sub:'committed',type:'insurance_inr',freq:'quarterly'},
   {date:'2026-04-01',merchant:'Rita Towers rent',amount:9250,type:'debit',cat:'expenses',sub:'shelter',type:'rent',freq:'quarterly'},
-  {date:'2026-04-07',merchant:'LIVAINS BSC',amount:1785,type:'debit',cat:'investments',sub:'all',type:'car_insurance',freq:'annual'},
-  {date:'2026-04-08',merchant:'Abu Dhabi Police',amount:202,type:'debit',cat:'expenses',sub:'misc',type:'traffic_fine',freq:'adhoc',avoidable:true,flag:'Traffic fine — avoidable'},
+  {date:'2026-04-07',merchant:'LIVAINS BSC',amount:1785,type:'debit',cat:'savings_investments',sub:'all',type:'car_insurance',freq:'annual'},
+  {date:'2026-04-08',merchant:'Abu Dhabi Police',amount:202,type:'debit',cat:'expenses',sub:'misc',type:'traffic_fine',freq:'adhoc'},
 ];
 
 // ══ FILES ══
@@ -451,6 +469,7 @@ async function startAnalysis(){
   buildProg(steps); let idx=0;
   try{
     let all=[], skipped=[];
+    linesDetected=null;
     for(let i=0;i<files.length;i++){
       setAct(i); idx=i;
       document.getElementById('ph').textContent=`Reading ${i+1} of ${files.length}...`;
@@ -492,6 +511,10 @@ async function startAnalysis(){
           const d=await res.json();
           if(d.error) throw new Error(d.message||d.error);
           all.push(...(d.transactions||[]));
+          // Aggregate Claude's self-reported transaction-line count across files
+          if(typeof d.lines_detected==='number'){
+            linesDetected=(linesDetected||0)+d.lines_detected;
+          }
           // Capture partial-success warnings (some chunks failed but others worked)
           if(d.warning){
             const detailStr=d.error_details?d.error_details.join(' | '):d.warning;
@@ -544,7 +567,7 @@ async function startAnalysis(){
     setAct(idx+1);
     document.getElementById('ph').textContent='Building your dashboard...';
     await wait(400); setDone(idx+1); setAct(idx+2);
-    allTxns=all.map((t,i)=>({...t,_id:i,_deleted:false}));
+    allTxns=all.map(migrateCat).map((t,i)=>({...t,_id:i,_deleted:false}));
     await wait(300); setDone(idx+2);
     // Skip review → go straight to dashboard
     await buildDashboard();
@@ -576,13 +599,13 @@ function renderReview(){
     all: live.length,
     income: live.filter(t=>t.cat==='income').length,
     expenses: live.filter(t=>t.cat==='expenses').length,
-    investments: live.filter(t=>t.cat==='investments').length,
+    savings_investments: live.filter(t=>t.cat==='savings_investments').length,
     loans: live.filter(t=>t.cat==='loans').length,
     unknown: live.filter(t=>t.cat==='expenses'&&t.type==='unknown').length,
   };
   document.querySelectorAll('.rfilt').forEach(el=>{
     const f=el.getAttribute('data-f');
-    const lbl={all:'All',income:'Income',expenses:'Expenses',investments:'Investments',loans:'Loans',unknown:'Unmatched'}[f]||f;
+    const lbl={all:'All',income:'Income',expenses:'Expenses',savings_investments:'Savings',loans:'Loans',unknown:'Unmatched'}[f]||f;
     el.textContent=`${lbl} (${counts[f]||0})`;
   });
   const body=document.getElementById('rev-body');
@@ -601,15 +624,15 @@ function renderReview(){
     const dateStr=(t.date||'').slice(5).replace('-','/');
     const amtColor=t.type==='credit'?'cr':'dr';
     const prefix=t.type==='credit'?'+':'-';
-    const avoidBadge=t.avoidable?`<span style="font-size:9px;background:#fde8e8;color:#c0392b;border-radius:4px;padding:1px 5px;margin-left:4px">avoidable</span>`:'';
+    const stfBadge=t.possibly_self_transfer?'<span class="stf-badge" title="This looks like a transfer to your own account. Consider moving it to Savings.">↔ self?</span>':'';
     return `<div class="txn-row" id="tr-${t._id}">
       <span class="txn-date">${dateStr}</span>
       <div style="flex:1;min-width:0">
-        <div class="txn-merchant">${t.merchant||'Unknown'}</div>
+        <div class="txn-merchant">${t.merchant||'Unknown'}${stfBadge}</div>
         ${t.note?`<div style="font-size:10px;color:var(--A);margin-top:1px">⚠ ${t.note}</div>`:''}
       </div>
       <span class="txn-amt ${amtColor}">${prefix}${fmt(t.amount)}</span>
-      <span class="txn-cat ${catCls}" onclick="openSheet(${t._id})">${catLabel}${avoidBadge}</span>
+      <span class="txn-cat ${catCls}" onclick="openSheet(${t._id})">${catLabel}</span>
       <span class="freq-badge ${ftCls}">${(t.freq||'adhoc').toUpperCase().slice(0,2)}</span>
       <button class="txn-del" onclick="deleteTxn(${t._id})" title="Remove">×</button>
     </div>`;
@@ -619,14 +642,10 @@ function renderReview(){
 
 function deleteTxn(id){
   const t=allTxns.find(x=>x._id===id);
-  if(t){
-    pushUndo([t]); // enable undo
-    t._deleted=true;
-  }
+  if(t) moveToRecycle([t]);
   const el=document.getElementById('tr-'+id);
   if(el) el.remove();
   updateRevCount();
-  showUndoBanner();
 }
 
 function updateRevCount(){
@@ -635,56 +654,53 @@ function updateRevCount(){
   document.getElementById('rev-sub').textContent=`${active.length} transactions · tap category to reassign · × to remove`;
 }
 
-// ══ UNDO ══
-// Stack-based undo for deletes. Push a snapshot before deleting; pop to restore.
-// Also auto-dismisses the banner after 8 seconds.
-function pushUndo(txns){
+// ══ RECYCLE BIN ══
+// Replaces undo. Delete → moves transactions to recycle bin (sets _deleted=true).
+// User can restore any/all from the Recycle tab. Bin empties when page is refreshed.
+function moveToRecycle(txns){
   if(!txns||!txns.length) return;
-  // Capture ids only — we flip _deleted=false to restore
-  deletedStack.push({ids: txns.map(t=>t._id), ts: Date.now()});
-  // Cap the stack at 20 entries to avoid unbounded growth
-  if(deletedStack.length>20) deletedStack.shift();
+  for(const t of txns){ if(t) t._deleted=true; }
+  showRecycleToast(txns.length);
 }
 
-function showUndoBanner(){
-  const bnr=document.getElementById('undo-bnr');
-  if(!bnr||!deletedStack.length) return;
-  const last=deletedStack[deletedStack.length-1];
-  const count=last.ids.length;
-  const lbl=document.getElementById('undo-bnr-lbl');
-  if(lbl) lbl.textContent=count===1?`Deleted 1 transaction`:`Deleted ${count} transactions`;
+function showRecycleToast(n){
+  const bnr=document.getElementById('recycle-toast');
+  if(!bnr) return;
+  const lbl=document.getElementById('recycle-toast-lbl');
+  if(lbl) lbl.textContent=n===1?`1 transaction moved to recycle bin`:`${n} transactions moved to recycle bin`;
   bnr.classList.add('on');
-  // Reset auto-dismiss timer
-  if(undoTimer) clearTimeout(undoTimer);
-  undoTimer=setTimeout(()=>{
+  if(toastTimer) clearTimeout(toastTimer);
+  toastTimer=setTimeout(()=>{
     bnr.classList.remove('on');
-    undoTimer=null;
-  },8000);
+    toastTimer=null;
+  },3500);
 }
 
-function hideUndoBanner(){
-  const bnr=document.getElementById('undo-bnr');
+function hideRecycleToast(){
+  const bnr=document.getElementById('recycle-toast');
   if(bnr) bnr.classList.remove('on');
-  if(undoTimer){clearTimeout(undoTimer); undoTimer=null;}
+  if(toastTimer){clearTimeout(toastTimer); toastTimer=null;}
 }
 
-function undoLastDelete(){
-  if(!deletedStack.length) return;
-  const last=deletedStack.pop();
-  for(const id of last.ids){
-    const t=allTxns.find(x=>x._id===id);
-    if(t) t._deleted=false;
-  }
-  hideUndoBanner();
-  // Re-render whichever screen is active + recompute
-  if(document.getElementById('sd').classList.contains('on')){
-    const active=allTxns.filter(x=>!x._deleted);
-    plData=computePL(active);
-    refreshDashHeader();
-    renderDash();
-  } else {
-    renderReview();
-  }
+function restoreFromRecycle(id){
+  const t=allTxns.find(x=>x._id===id);
+  if(!t) return;
+  t._deleted=false;
+  // Recompute everything
+  const active=allTxns.filter(x=>!x._deleted);
+  plData=computePL(active);
+  refreshDashHeader();
+  renderDash();
+}
+
+function restoreAllFromRecycle(){
+  const deleted=allTxns.filter(x=>x._deleted);
+  if(!deleted.length) return;
+  for(const t of deleted){ t._deleted=false; }
+  const active=allTxns.filter(x=>!x._deleted);
+  plData=computePL(active);
+  refreshDashHeader();
+  renderDash();
 }
 
 // ══ BULK SELECT ══
@@ -732,15 +748,13 @@ function bulkClear(){
 function bulkDelete(){
   if(!bulkSelected.size) return;
   const toDel=[...bulkSelected].map(id=>allTxns.find(x=>x._id===id)).filter(Boolean);
-  pushUndo(toDel);
-  for(const t of toDel){ t._deleted=true; }
+  moveToRecycle(toDel);
   bulkSelected.clear();
   bulkMode=false;
   const active=allTxns.filter(x=>!x._deleted);
   if(plData) plData=computePL(active);
   refreshDashHeader();
   renderDash();
-  showUndoBanner();
 }
 
 function bulkMoveStart(){
@@ -818,14 +832,14 @@ function refreshDashHeader(){
   const active=allTxns.filter(t=>!t._deleted);
   if(!active.length||!plData) return;
   const incTot=plData.totals.income, expTot=plData.totals.expenses;
-  const invTot=plData.totals.invest, loanTot=plData.totals.loans;
+  const invTot=plData.totals.savings_investments, loanTot=plData.totals.loans;
   document.getElementById('dpd').textContent=`${plData.period_label.replace(/^Total · /,'')} · ${active.length} transactions`;
   document.getElementById('dsurp').textContent=`AED ${fmt(plData.surplus_avg)}/mo`;
   const cnt={
     all: active.length,
     income: active.filter(t=>t.cat==='income').length,
     expenses: active.filter(t=>t.cat==='expenses').length,
-    investments: active.filter(t=>t.cat==='investments').length,
+    savings_investments: active.filter(t=>t.cat==='savings_investments').length,
     loans: active.filter(t=>t.cat==='loans').length,
   };
   document.getElementById('mv-a').textContent=''+cnt.all;
@@ -835,22 +849,26 @@ function refreshDashHeader(){
   document.getElementById('mv-l').textContent='AED '+fK(loanTot);
   document.getElementById('mlbl-i').textContent=`Income · ${cnt.income}`;
   document.getElementById('mlbl-e').textContent=`Expenses · ${cnt.expenses}`;
-  document.getElementById('mlbl-v').textContent=`Investments · ${cnt.investments}`;
+  document.getElementById('mlbl-v').textContent=`Savings · ${cnt.savings_investments}`;
   document.getElementById('mlbl-l').textContent=`Loans · ${cnt.loans}`;
+  // Recycle tab visible only when something is in it
+  const binCount=allTxns.filter(t=>t._deleted).length;
+  const recycleTab=document.getElementById('mt-recycle');
+  if(recycleTab){
+    recycleTab.style.display=binCount>0?'block':'none';
+    const mvr=document.getElementById('mv-r');
+    if(mvr) mvr.textContent=''+binCount;
+  }
 }
 
 // Delete from dashboard row
 function dashDelete(id){
   const t=allTxns.find(x=>x._id===id);
-  if(t){
-    pushUndo([t]);
-    t._deleted=true;
-  }
+  if(t) moveToRecycle([t]);
   const active=allTxns.filter(x=>!x._deleted);
   if(plData) plData=computePL(active);
   refreshDashHeader();
   renderDash();
-  showUndoBanner();
 }
 
 // Expand/collapse the file-warning banner
@@ -919,32 +937,11 @@ async function buildDashboard(){
   // P&L computation is pure maths — no AI needed
   plData=computePL(active);
   show('sd');
-  // Update header
-  const incTot=plData.totals.income, expTot=plData.totals.expenses;
-  const invTot=plData.totals.invest, loanTot=plData.totals.loans;
+  // Avatar + initial user info (rest is set by refreshDashHeader)
   document.getElementById('dav').textContent='W';
   document.getElementById('dnm').textContent='Your money';
-  document.getElementById('dpd').textContent=`${plData.period_label.replace(/^Total · /,'')} · ${active.length} transactions`;
-  document.getElementById('dsurp').textContent=`AED ${fmt(plData.surplus_avg)}/mo`;
-  // Counts per category
-  const cnt={
-    all: active.length,
-    income: active.filter(t=>t.cat==='income').length,
-    expenses: active.filter(t=>t.cat==='expenses').length,
-    investments: active.filter(t=>t.cat==='investments').length,
-    loans: active.filter(t=>t.cat==='loans').length,
-  };
-  document.getElementById('mv-a').textContent=''+cnt.all;
-  document.getElementById('mv-i').textContent='AED '+fK(incTot);
-  document.getElementById('mv-e').textContent='AED '+fK(expTot);
-  document.getElementById('mv-v').textContent='AED '+fK(invTot);
-  document.getElementById('mv-l').textContent='AED '+fK(loanTot);
-  // Add counts to labels
   document.getElementById('mlbl-a').textContent='All';
-  document.getElementById('mlbl-i').textContent=`Income · ${cnt.income}`;
-  document.getElementById('mlbl-e').textContent=`Expenses · ${cnt.expenses}`;
-  document.getElementById('mlbl-v').textContent=`Investments · ${cnt.investments}`;
-  document.getElementById('mlbl-l').textContent=`Loans · ${cnt.loans}`;
+  refreshDashHeader(); // sets all counts/values/recycle visibility from plData + allTxns
   // Reset tabs to All + default to All view
   document.querySelectorAll('.mt').forEach(t=>t.classList.remove('on'));
   document.querySelector('.mt').classList.add('on'); // first .mt is All
@@ -970,10 +967,10 @@ async function fetchInsight(active){
   const totals={
     income: Math.round(active.filter(t=>t.cat==='income').reduce((a,t)=>a+t.amount,0)),
     expenses: Math.round(active.filter(t=>t.cat==='expenses').reduce((a,t)=>a+t.amount,0)),
-    investments: Math.round(active.filter(t=>t.cat==='investments').reduce((a,t)=>a+t.amount,0)),
+    savings_investments: Math.round(active.filter(t=>t.cat==='savings_investments').reduce((a,t)=>a+t.amount,0)),
     loans: Math.round(active.filter(t=>t.cat==='loans').reduce((a,t)=>a+t.amount,0)),
   };
-  // Top merchants (expenses only)
+  // Top merchants (expenses only — savings transfers excluded by definition)
   const mg={};
   for(const t of active.filter(t=>t.cat==='expenses')){
     const k=t.merchant||'Unknown';
@@ -989,9 +986,6 @@ async function fetchInsight(active){
     by_sub[t.sub]=(by_sub[t.sub]||0)+t.amount;
   }
   Object.keys(by_sub).forEach(k=>by_sub[k]=Math.round(by_sub[k]));
-  // Avoidable
-  const avoidable=active.filter(t=>t.avoidable);
-  const avoidable_total=Math.round(avoidable.reduce((a,t)=>a+t.amount,0));
   // Month-over-month (only if >1 month)
   let mom='';
   if(plData.pl_months.length>1){
@@ -1005,7 +999,6 @@ async function fetchInsight(active){
     period: plData.period_label.replace(/^Total · /,''),
     months: plData.months,
     totals, top_merchants, by_sub,
-    avoidable_total, avoidable_count: avoidable.length,
     month_over_month: mom,
   };
   const res=await fetch(WORKER_URL,{
@@ -1053,39 +1046,61 @@ function computePL(txns){
   const monthMap={};
   for(const t of txns){
     const m=(t.date||'').slice(0,7)||'unknown';
-    if(!monthMap[m]) monthMap[m]={inc:0,exp:0,inv:0,loans:0};
+    if(!monthMap[m]) monthMap[m]={inc:0,exp:0,sav:0,loans:0};
     const amt=Number(t.amount)||0;
     if(t.cat==='income') monthMap[m].inc+=amt;
     else if(t.cat==='expenses') monthMap[m].exp+=amt;
-    else if(t.cat==='investments') monthMap[m].inv+=amt;
+    else if(t.cat==='savings_investments') monthMap[m].sav+=amt;
     else if(t.cat==='loans') monthMap[m].loans+=amt;
   }
   const MO={'01':'Jan','02':'Feb','03':'Mar','04':'Apr','05':'May','06':'Jun','07':'Jul','08':'Aug','09':'Sep','10':'Oct','11':'Nov','12':'Dec'};
-  const pl_months=Object.entries(monthMap).sort(([a],[b])=>a.localeCompare(b)).map(([ym,v])=>{
+  const ymKeys=Object.keys(monthMap).filter(k=>k!=='unknown').sort();
+  const pl_months=ymKeys.map(ym=>{
     const [yr,mo]=ym.split('-');
-    return{m:`${MO[mo]||mo} ${(yr||'').slice(2)}`,inc:Math.round(v.inc),exp:Math.round(v.exp),inv:Math.round(v.inv),loans:Math.round(v.loans)};
+    const v=monthMap[ym];
+    return{ym,m:`${MO[mo]||mo} ${(yr||'').slice(2)}`,inc:Math.round(v.inc),exp:Math.round(v.exp),sav:Math.round(v.sav),loans:Math.round(v.loans)};
   });
   const n=pl_months.length||1;
-  const totals=pl_months.reduce((a,r)=>({income:a.income+r.inc,expenses:a.expenses+r.exp,invest:a.invest+r.inv,loans:a.loans+r.loans}),{income:0,expenses:0,invest:0,loans:0});
+  const totals=pl_months.reduce((a,r)=>({income:a.income+r.inc,expenses:a.expenses+r.exp,savings_investments:a.savings_investments+r.sav,loans:a.loans+r.loans}),{income:0,expenses:0,savings_investments:0,loans:0});
   // Build a human-readable period label from actual data
-  const MO2={'01':'Jan','02':'Feb','03':'Mar','04':'Apr','05':'May','06':'Jun','07':'Jul','08':'Aug','09':'Sep','10':'Oct','11':'Nov','12':'Dec'};
-  const ymKeys=Object.keys(monthMap).filter(k=>k!=='unknown').sort();
   let period_label='Total';
   if(ymKeys.length){
     const first=ymKeys[0], last=ymKeys[ymKeys.length-1];
     const [fy,fm]=first.split('-'), [ly,lm]=last.split('-');
     period_label=first===last
-      ? `Total · ${MO2[fm]} ${fy.slice(2)}`
-      : `Total · ${MO2[fm]} ${fy.slice(2)} – ${MO2[lm]} ${ly.slice(2)}`;
+      ? `Total · ${MO[fm]} ${fy.slice(2)}`
+      : `Total · ${MO[fm]} ${fy.slice(2)} – ${MO[lm]} ${ly.slice(2)}`;
   }
-  return{pl_months,totals,surplus_avg:Math.round((totals.income-totals.expenses-totals.invest-totals.loans)/n),months:n,period_label};
+  return{pl_months,ym_ordered:ymKeys,totals,surplus_avg:Math.round((totals.income-totals.expenses-totals.savings_investments-totals.loans)/n),months:n,period_label};
+}
+
+// ══ MONTHLY TIMELINE HELPER ══
+// Given a set of transactions and the ordered month keys, produce a horizontal strip
+// showing "Jan 450 / Feb 520 / Mar 680 …". Returns HTML string. Returns empty string
+// if fewer than 2 months — no timeline to show.
+function buildMonthlyStrip(txns,plDataRef){
+  if(!plDataRef||!plDataRef.ym_ordered||plDataRef.ym_ordered.length<2) return '';
+  const MO={'01':'Jan','02':'Feb','03':'Mar','04':'Apr','05':'May','06':'Jun','07':'Jul','08':'Aug','09':'Sep','10':'Oct','11':'Nov','12':'Dec'};
+  const byMonth={};
+  for(const t of txns){
+    const ym=(t.date||'').slice(0,7);
+    if(!ym) continue;
+    byMonth[ym]=(byMonth[ym]||0)+(Number(t.amount)||0);
+  }
+  const cells=plDataRef.ym_ordered.map(ym=>{
+    const [,mo]=ym.split('-');
+    const v=Math.round(byMonth[ym]||0);
+    const zero=v===0;
+    return `<div class="mt-cell ${zero?'zero':''}"><div class="mt-cell-m">${MO[mo]||mo}</div><div class="mt-cell-v">${v>=1000?fK2(v):fmt(v)}</div></div>`;
+  }).join('');
+  return `<div class="mt-strip">${cells}</div>`;
 }
 
 // ══ DASHBOARD RENDER ══
 function sM(id,el){
   cM=id;
   document.querySelectorAll('.mt').forEach(t=>t.classList.remove('on'));el.classList.add('on');
-  ['all','income','expenses','invest','loans','pl'].forEach(k=>{const sb=document.getElementById('sb-'+k);if(sb)sb.style.display=k===id?'flex':'none';});
+  ['all','income','expenses','savings_investments','loans','pl','recycle'].forEach(k=>{const sb=document.getElementById('sb-'+k);if(sb)sb.style.display=k===id?'flex':'none';});
   renderDash();
 }
 function sS(main,sub,el){cS[main]=sub;document.querySelectorAll(`#sb-${main} .stab`).forEach(t=>t.classList.remove('on'));el.classList.add('on');renderDash();}
@@ -1099,24 +1114,25 @@ function renderDash(){
   function sumAmt(arr){return arr.reduce((a,t)=>a+(Number(t.amount)||0),0);}
   function groupMerchant(arr){
     const g={};
-    for(const t of arr){const k=t.merchant||'Unknown';if(!g[k])g[k]={amt:0,freq:t.freq,note:t.note,avoidable:t.avoidable};g[k].amt+=Number(t.amount)||0;}
-    return Object.entries(g).sort(([,a],[,b])=>b.amt-a.amt).map(([n,v])=>({n,s:'',f:v.freq,a:v.amt,avoidable:v.avoidable,note:v.note}));
+    for(const t of arr){const k=t.merchant||'Unknown';if(!g[k])g[k]={amt:0,freq:t.freq,note:t.note};g[k].amt+=Number(t.amount)||0;}
+    return Object.entries(g).sort(([,a],[,b])=>b.amt-a.amt).map(([n,v])=>({n,s:'',f:v.freq,a:v.amt,note:v.note}));
   }
   // Interactive row — tap merchant to reassign, × to delete
   function irx(t){
-    const color=t.direction==='CR'?'G':(t.cat==='loans'?'B':(t.cat==='investments'?'B':'R'));
+    const color=t.direction==='CR'?'G':(t.cat==='loans'?'B':(t.cat==='savings_investments'?'B':'R'));
     const sign=t.direction==='CR'?'+':'−';
     const dateStr=(t.date||'').slice(5).replace('-','/');
     const catInfo=CATS[t.cat];
     const catLbl=catInfo?catInfo.label:t.cat;
     const subLbl=t.type&&t.type!=='other'?' · '+t.type.replace(/_/g,' '):'';
     const pairedBadge=t._paired?'<span style="font-size:9px;background:#e8eef5;color:#3e5676;border-radius:4px;padding:1px 5px;margin-left:6px">paired</span>':'';
+    const stfBadge=t.possibly_self_transfer?'<span class="stf-badge" title="This looks like a transfer to your own account. Consider moving it to Savings.">↔ self?</span>':'';
     const selected=bulkSelected.has(t._id);
     if(bulkMode){
       return `<div class="ir ${selected?'bulk-sel':''}" id="dr-${t._id}" onclick="bulkToggleRow(${t._id},event)" style="cursor:pointer">
         <div class="bulk-cb ${selected?'on':''}"></div>
         <div class="il" style="flex:1;min-width:0">
-          <div class="inm">${t.merchant}${pairedBadge}</div>
+          <div class="inm">${t.merchant}${pairedBadge}${stfBadge}</div>
           <div class="is">${dateStr} · ${catLbl}${subLbl}</div>
         </div>
         <div class="ira"><div class="ia c${color}">${sign}AED ${fmt(t.amount)}</div></div>
@@ -1124,7 +1140,7 @@ function renderDash(){
     }
     return `<div class="ir" id="dr-${t._id}">
       <div class="il" style="cursor:pointer" onclick="openSheet(${t._id})">
-        <div class="inm">${t.merchant}${pairedBadge}</div>
+        <div class="inm">${t.merchant}${pairedBadge}${stfBadge}</div>
         <div class="is">${dateStr} · ${catLbl}${subLbl}</div>
       </div>
       <div class="ira" style="display:flex;align-items:center;gap:8px">
@@ -1170,6 +1186,25 @@ function renderDash(){
     const totCr=txns.filter(t=>t.direction==='CR').reduce((a,t)=>a+(Number(t.amount)||0),0);
     const totDr=txns.filter(t=>t.direction==='DR').reduce((a,t)=>a+(Number(t.amount)||0),0);
     h+=stats2([{l:d.period_label||'All',v:''+txns.length+' txns',c:''},{l:'Money in',v:'AED '+fmt(totCr),c:'G'},{l:'Money out',v:'AED '+fmt(totDr),c:'R'}]);
+    // Coverage verification — only show when Claude's detected count differs from extracted count
+    if(linesDetected!=null){
+      const extracted=allTxns.length; // before any user deletions
+      if(linesDetected===extracted){
+        h+=`<div style="font-size:11px;color:var(--G);background:var(--Gl);border:1px solid rgba(26,122,74,.2);border-radius:6px;padding:7px 11px;margin-bottom:10px;display:flex;align-items:center;gap:6px"><span>✓</span><span>All ${extracted} transaction lines detected in your statements were extracted.</span></div>`;
+      } else if(linesDetected>extracted){
+        const diff=linesDetected-extracted;
+        h+=`<div style="font-size:11px;color:#5c3c06;background:var(--Ab);border:1px solid rgba(146,96,10,.3);border-radius:6px;padding:7px 11px;margin-bottom:10px;display:flex;align-items:center;gap:6px"><span>⚠</span><span>${extracted} of ${linesDetected} transaction lines extracted — ${diff} skipped (duplicates or unreadable rows).</span></div>`;
+      }
+    }
+    // Monthly timeline — net money flow per month
+    if(d.pl_months.length>=2){
+      h+=secl('Monthly activity');
+      h+=`<div class="mt-strip">${d.pl_months.map(pm=>{
+        const net=pm.inc-pm.exp-pm.sav-pm.loans;
+        const cls=net>=0?'':'zero';
+        return `<div class="mt-cell"><div class="mt-cell-m">${pm.m.split(' ')[0]}</div><div class="mt-cell-v" style="color:${net>=0?'var(--G)':'var(--R)'}">${net>=0?'+':'−'}${fK2(Math.abs(net))}</div></div>`;
+      }).join('')}</div>`;
+    }
     h+=secl('All transactions (newest first) · tap to reassign · × to delete');
     h+=`<div class="ig">`;
     if(!sorted.length){h+=`<div style="padding:14px 0;text-align:center;font-size:12px;color:var(--t3)">No transactions</div>`;}
@@ -1178,26 +1213,27 @@ function renderDash(){
   }
   else if(m==='income'){
     const direct=catTxns('income','direct'), indirect=catTxns('income','indirect');
-    if(s==='direct'){
-      h+=stats2([{l:'Total',v:'AED '+fmt(sumAmt(direct)),c:'G'},{l:'Monthly avg',v:'AED '+fmt(Math.round(sumAmt(direct)/d.months))},{l:'Months',v:''+d.months}]);
-      h+=secl('Direct income · tap to reassign · × to delete');h+=`<div class="ig">`;
-      if(!direct.length) h+=`<div style="padding:14px 0;text-align:center;font-size:12px;color:var(--t3)">No transactions</div>`;
-      direct.sort((a,b)=>(b.date||'').localeCompare(a.date||'')).forEach(t=>{h+=irx(t);});
-      h+=`</div>`;
-    }else{
-      h+=stats2([{l:'Total',v:'AED '+fmt(sumAmt(indirect)),c:'G'},{l:'Transactions',v:''+indirect.length}]);
-      h+=secl('Indirect income · tap to reassign · × to delete');h+=`<div class="ig">`;
-      if(!indirect.length) h+=`<div style="padding:14px 0;text-align:center;font-size:12px;color:var(--t3)">No transactions</div>`;
-      indirect.sort((a,b)=>(b.date||'').localeCompare(a.date||'')).forEach(t=>{h+=irx(t);});
-      h+=`</div>`;
-    }
+    const currentSet=s==='direct'?direct:indirect;
+    const currentLbl=s==='direct'?'Direct income':'Indirect income';
+    h+=stats2([{l:'Total',v:'AED '+fmt(sumAmt(currentSet)),c:'G'},{l:'Monthly avg',v:'AED '+fmt(Math.round(sumAmt(currentSet)/d.months))},{l:'Transactions',v:''+currentSet.length}]);
+    // Monthly timeline for this sub
+    const strip=buildMonthlyStrip(currentSet,d);
+    if(strip){ h+=secl(`${currentLbl} by month`); h+=strip; }
+    h+=secl(`${currentLbl} · tap to reassign · × to delete`);
+    h+=`<div class="ig">`;
+    if(!currentSet.length) h+=`<div style="padding:14px 0;text-align:center;font-size:12px;color:var(--t3)">No transactions</div>`;
+    currentSet.sort((a,b)=>(b.date||'').localeCompare(a.date||'')).forEach(t=>{h+=irx(t);});
+    h+=`</div>`;
   }
   else if(m==='expenses'){
     const sub=s;
     const txnsInSub=catTxns('expenses',sub);
     const tot=sumAmt(txnsInSub);
-    const avoidable=txnsInSub.filter(t=>t.avoidable);
     h+=stats2([{l:d.period_label||'Total',v:'AED '+fmt(tot),c:'R'},{l:'Monthly avg',v:'AED '+fmt(Math.round(tot/d.months))},{l:'Transactions',v:''+txnsInSub.length}]);
+    // Monthly timeline for this sub
+    const strip=buildMonthlyStrip(txnsInSub,d);
+    const subLbl=CATS.expenses.subs[sub]||sub;
+    if(strip){ h+=secl(`${subLbl} by month`); h+=strip; }
     // Subscription audit — shown only in Misc tab
     if(sub==='misc'){
       const subs=detectSubscriptions(txns);
@@ -1211,37 +1247,37 @@ function renderDash(){
         h+=`</div>`;
       }
     }
-    if(avoidable.length){
-      h+=secl(`Avoidable charges · AED ${fmt(sumAmt(avoidable))} total`);
-      h+=`<div class="ig">`;
-      avoidable.sort((a,b)=>b.amount-a.amount).forEach(t=>{h+=irx(t);});
-      h+=`</div>`;
-    }
-    h+=secl(`${CATS.expenses.subs[sub]||sub} · tap to reassign · × to delete`);
+    h+=secl(`${subLbl} · tap to reassign · × to delete`);
     h+=`<div class="ig">`;
-    const nonAvoid=txnsInSub.filter(t=>!t.avoidable).sort((a,b)=>(b.date||'').localeCompare(a.date||''));
-    nonAvoid.forEach(t=>{h+=irx(t);});
-    if(!nonAvoid.length) h+=`<div style="padding:14px 0;text-align:center;font-size:12px;color:var(--t3)">No transactions</div>`;
+    const sorted=txnsInSub.sort((a,b)=>(b.date||'').localeCompare(a.date||''));
+    sorted.forEach(t=>{h+=irx(t);});
+    if(!sorted.length) h+=`<div style="padding:14px 0;text-align:center;font-size:12px;color:var(--t3)">No transactions</div>`;
     h+=`</div>`;
   }
-  else if(m==='invest'){
-    const inv=catTxns('investments');
-    const tot=sumAmt(inv);
-    h+=stats2([{l:d.period_label||'Total',v:'AED '+fmt(tot),c:'B'},{l:'Monthly avg',v:'AED '+fmt(Math.round(tot/d.months))},{l:'Plans',v:''+new Set(inv.map(t=>t.merchant)).size}]);
-    h+=secl('Investments · tap to reassign · × to delete');h+=`<div class="ig">`;
-    if(!inv.length) h+=`<div style="padding:14px 0;text-align:center;font-size:12px;color:var(--t3)">No transactions</div>`;
-    inv.sort((a,b)=>(b.date||'').localeCompare(a.date||'')).forEach(t=>{h+=irx(t);});
+  else if(m==='savings_investments'){
+    const sub=s||'liquid';
+    const subTxns=catTxns('savings_investments',sub);
+    const tot=sumAmt(subTxns);
+    const subLbl=CATS.savings_investments.subs[sub]||sub;
+    h+=stats2([{l:d.period_label||'Total',v:'AED '+fmt(tot),c:'B'},{l:'Monthly avg',v:'AED '+fmt(Math.round(tot/d.months))},{l:'Plans',v:''+new Set(subTxns.map(t=>t.merchant)).size}]);
+    const strip=buildMonthlyStrip(subTxns,d);
+    if(strip){ h+=secl(`${subLbl} by month`); h+=strip; }
+    h+=secl(`${subLbl} · tap to reassign · × to delete`);
+    h+=`<div class="ig">`;
+    if(!subTxns.length) h+=`<div style="padding:14px 0;text-align:center;font-size:12px;color:var(--t3)">No transactions${sub==='liquid'?' — tap "↔ self?" flagged items on other tabs to move them here':''}</div>`;
+    subTxns.sort((a,b)=>(b.date||'').localeCompare(a.date||'')).forEach(t=>{h+=irx(t);});
     h+=`</div>`;
   }
   else if(m==='loans'){
     const loansRaw=catTxns('loans');
     const loans=netCardPayments(loansRaw);
     const pairedCount=loans.filter(t=>t._paired).length;
-    const tot=sumAmt(loans);
     const drTot=loans.filter(t=>t.direction==='DR').reduce((a,t)=>a+t.amount,0);
-    const crTot=loans.filter(t=>t.direction==='CR').reduce((a,t)=>a+t.amount,0);
     const salaryMonthly=d.totals.income/(d.months||1)||1;
     h+=stats2([{l:d.period_label||'Total',v:'AED '+fmt(drTot),c:'B'},{l:'Monthly',v:'AED '+fmt(Math.round(drTot/d.months))},{l:'% income',v:Math.round(drTot/d.months/salaryMonthly*100)+'%'}]);
+    // Monthly timeline — DR only (outflows)
+    const strip=buildMonthlyStrip(loans.filter(t=>t.direction==='DR'),d);
+    if(strip){ h+=secl('Payments by month'); h+=strip; }
     if(pairedCount>0){
       h+=`<div class="ins iG" style="font-size:11px">ℹ ${pairedCount/2} payment${pairedCount/2>1?'s':''} appear on both a bank statement (debit) and a credit-card statement (credit) — marked "paired". The net cash-flow impact is only the debit side.</div>`;
     }
@@ -1253,31 +1289,59 @@ function renderDash(){
   }
   else if(m==='pl'){
     if(s==='monthly'){
-      h+=`<div class="af"><span>P&L</span> = <span>Income</span> − <span>Expenses</span> − <span>Investments</span> − <span>Loans</span></div>`;
-      h+=`<div style="overflow-x:auto"><table class="plt" style="min-width:280px"><thead><tr><th>Month</th><th>Inc.</th><th>Exp.</th><th>Inv.</th><th>Loans</th><th>P&L</th></tr></thead><tbody>`;
+      h+=`<div class="af"><span>P&L</span> = <span>Income</span> − <span>Expenses</span> − <span>Savings &amp; Inv.</span> − <span>Loans</span></div>`;
+      h+=`<div style="overflow-x:auto"><table class="plt" style="min-width:280px"><thead><tr><th>Month</th><th>Inc.</th><th>Exp.</th><th>S&amp;I</th><th>Loans</th><th>P&L</th></tr></thead><tbody>`;
       let grand=0;
       d.pl_months.forEach(r=>{
-        const pl=r.inc-r.exp-r.inv-r.loans;grand+=pl;
-        h+=`<tr><td>${r.m}</td><td class="pd2">${fK2(r.inc)}</td><td class="pd2">${fK2(r.exp)}</td><td class="pd2">${fK2(r.inv)}</td><td class="pd2">${fK2(r.loans)}</td><td class="${pl>=0?'pp':'pn'}">${pl>=0?'+':''}${fK2(Math.abs(pl))}</td></tr>`;
+        const pl=r.inc-r.exp-r.sav-r.loans;grand+=pl;
+        h+=`<tr><td>${r.m}</td><td class="pd2">${fK2(r.inc)}</td><td class="pd2">${fK2(r.exp)}</td><td class="pd2">${fK2(r.sav)}</td><td class="pd2">${fK2(r.loans)}</td><td class="${pl>=0?'pp':'pn'}">${pl>=0?'+':''}${fK2(Math.abs(pl))}</td></tr>`;
       });
-      const {income:ti,expenses:te,invest:tv,loans:tl}=d.totals;
+      const {income:ti,expenses:te,savings_investments:tv,loans:tl}=d.totals;
       h+=`<tr class="tot"><td>Total</td><td class="pp">${fK2(ti)}</td><td class="pn">${fK2(te)}</td><td class="pn">${fK2(tv)}</td><td class="pn">${fK2(tl)}</td><td class="${grand>=0?'pp':'pn'}">${grand>=0?'+':''}${fK2(Math.abs(grand))}</td></tr></tbody></table></div>`;
-      h+=ins('G',`Average monthly surplus: <strong>AED ${fmt(d.surplus_avg)}</strong>. The P&L is based on your confirmed transactions after review.`);
+      h+=ins('G',`Average monthly surplus: <strong>AED ${fmt(d.surplus_avg)}</strong>. Savings and investments are subtracted because they reflect money set aside, not consumed.`);
     }else{
       const n=d.months||1;
-      const {income:ti,expenses:te,invest:tv,loans:tl}=d.totals;
+      const {income:ti,expenses:te,savings_investments:tv,loans:tl}=d.totals;
       const surplus=Math.round((ti-te-tv-tl)/n);
       h+=`<div class="af">Monthly averages over ${n} month${n!==1?'s':''}</div>`;
       h+=`<div class="ig">`;
       h+=ir('Income',`AED ${fmt(Math.round(ti/n))}/mo avg`,'','+AED '+fmt(Math.round(ti/n)),'G','/mo avg');
       h+=ir('Expenses',`AED ${fmt(Math.round(te/n))}/mo avg`,'','-AED '+fmt(Math.round(te/n)),'R','');
-      h+=ir('Investments',`AED ${fmt(Math.round(tv/n))}/mo avg`,'','-AED '+fmt(Math.round(tv/n)),'B','');
+      h+=ir('Savings &amp; Investments',`AED ${fmt(Math.round(tv/n))}/mo avg`,'','-AED '+fmt(Math.round(tv/n)),'B','');
       h+=ir('Loans',`AED ${fmt(Math.round(tl/n))}/mo avg`,'','-AED '+fmt(Math.round(tl/n)),'B','');
       h+=`</div>`;
       h+=`<div style="margin-top:10px">
-        <div class="scr main"><span style="font-weight:600">Monthly surplus</span><span style="font-weight:700;color:var(--G)">+AED ${fmt(surplus)}</span></div>
+        <div class="scr main"><span style="font-weight:600">Monthly surplus</span><span style="font-weight:700;color:${surplus>=0?'var(--G)':'var(--R)'}">${surplus>=0?'+':'−'}AED ${fmt(Math.abs(surplus))}</span></div>
       </div>`;
     }
+  }
+  else if(m==='recycle'){
+    // Recycle bin — list all deleted transactions with a Restore button each
+    const deleted=allTxns.filter(t=>t._deleted).sort((a,b)=>(b.date||'').localeCompare(a.date||''));
+    h+=stats2([{l:'In bin',v:''+deleted.length+' txns',c:''},{l:'Restorable',v:'All',c:'G'},{l:'On refresh',v:'Cleared',c:''}]);
+    if(deleted.length>0){
+      h+=`<div class="recycle-actions"><button class="recycle-action-btn" onclick="restoreAllFromRecycle()">↺ Restore all</button></div>`;
+    }
+    h+=secl('Deleted transactions · tap Restore to bring them back');
+    h+=`<div class="ig" style="padding:0">`;
+    if(!deleted.length){
+      h+=`<div style="padding:24px 14px;text-align:center;font-size:12px;color:var(--t3)">The recycle bin is empty. Deleted transactions will appear here for you to restore during this session.</div>`;
+    }
+    deleted.forEach(t=>{
+      const dateStr=(t.date||'').slice(5).replace('-','/');
+      const catInfo=CATS[t.cat];
+      const catLbl=catInfo?catInfo.label:t.cat;
+      const sign=t.direction==='CR'?'+':'−';
+      const color=t.direction==='CR'?'var(--G)':'var(--t2)';
+      h+=`<div class="recycle-row">
+        <div style="flex:1;min-width:0">
+          <div style="font-size:13px;color:var(--t)">${t.merchant}</div>
+          <div style="font-size:11px;color:var(--t3);margin-top:2px">${dateStr} · ${catLbl} · ${sign}AED ${fmt(t.amount)}</div>
+        </div>
+        <button class="recycle-restore" onclick="restoreFromRecycle(${t._id})">↺ Restore</button>
+      </div>`;
+    });
+    h+=`</div>`;
   }
   el.innerHTML=h;
   refreshBulkBar();
