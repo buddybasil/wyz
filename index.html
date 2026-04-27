@@ -245,6 +245,133 @@ html,body{height:100%;font-family:'DM Sans',sans-serif;background:var(--bg);colo
 .xp-badge{display:inline-flex;align-items:center;font-size:9px;font-weight:600;background:#ede8fa;color:#4a2d8c;border:1px solid rgba(74,45,140,.2);border-radius:10px;padding:1px 6px;margin-left:6px;cursor:help;white-space:nowrap}
 /* Paired rows dimmed to show they're netted to zero */
 .ir.xp-row{opacity:.55}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   MONTH CHIPS — clickable month filter at the top of the dashboard.
+   Each chip shows month label + that month's net P/L (green or red).
+   Replaces the old horizontal main-tab strip (Income/Expenses/etc.).
+   ═══════════════════════════════════════════════════════════════════════ */
+.month-chips{display:flex;gap:6px;overflow-x:auto;scrollbar-width:none;padding:8px 13px 10px;background:var(--bg);border-top:1px solid var(--b)}
+.month-chips::-webkit-scrollbar{display:none}
+.mchip{flex:0 0 auto;min-width:64px;padding:6px 10px;border-radius:10px;background:var(--s);border:1px solid var(--b);cursor:pointer;text-align:center;transition:all .12s;user-select:none}
+.mchip:hover{border-color:var(--bm)}
+.mchip.on{background:var(--t);border-color:var(--t);box-shadow:0 2px 6px rgba(0,0,0,.15)}
+.mchip-lbl{font-size:10px;font-weight:600;color:var(--t3);letter-spacing:.04em;text-transform:uppercase}
+.mchip-pl{font-size:12px;font-weight:700;margin-top:2px;color:var(--t)}
+.mchip.on .mchip-lbl{color:rgba(255,255,255,.7)}
+.mchip.on .mchip-pl{color:#fff}
+.mchip-pl.pos{color:var(--G)}.mchip-pl.neg{color:var(--R)}
+.mchip.on .mchip-pl.pos{color:#7fd99f}.mchip.on .mchip-pl.neg{color:#f7a6a0}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   STATEMENT LAYOUT — vertical sections with sub-section grouping.
+   Each main bucket becomes a SECTION; each sub-bucket a SUBSECTION.
+   ═══════════════════════════════════════════════════════════════════════ */
+.section{background:var(--s);border:1px solid var(--b);border-radius:var(--r);margin-bottom:12px;overflow:hidden}
+.section-hdr{display:flex;align-items:baseline;justify-content:space-between;padding:11px 14px 9px;border-bottom:1px solid var(--b);gap:10px;background:var(--bg)}
+.section-hdr-lbl{font-size:13px;font-weight:600;letter-spacing:-.01em;color:var(--t)}
+.section-hdr-meta{font-size:11px;color:var(--t3);font-weight:500;white-space:nowrap}
+.section-hdr-amt{font-size:14px;font-weight:700;letter-spacing:-.01em}
+.section-hdr-amt.pos{color:var(--G)}.section-hdr-amt.neg{color:var(--R)}.section-hdr-amt.neutral{color:var(--t)}
+.section-body{padding:0 14px}
+
+.subsection{padding:10px 0;border-bottom:1px solid var(--b)}
+.subsection:last-child{border-bottom:none}
+.subsection-hdr{display:flex;align-items:baseline;justify-content:space-between;gap:8px;padding-bottom:6px;cursor:pointer;user-select:none}
+.subsection-lbl{font-size:11px;font-weight:600;color:var(--t2);letter-spacing:.04em;text-transform:uppercase}
+.subsection-amt{font-size:12px;font-weight:600;color:var(--t)}
+.subsection-amt.pos{color:var(--G)}.subsection-amt.neg{color:var(--t)}
+.subsection-meta{font-size:10px;color:var(--t3);font-weight:500;margin-left:6px}
+.subsection.collapsed .subsection-rows{display:none}
+.subsection-collapse-icon{font-size:9px;color:var(--t3);margin-right:4px;transition:transform .15s;display:inline-block}
+.subsection.collapsed .subsection-collapse-icon{transform:rotate(-90deg)}
+
+.subsection-rows{display:flex;flex-direction:column;gap:0}
+.tx-row{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:7px 0;border-top:1px dashed rgba(0,0,0,.05);font-size:12px}
+.tx-row:first-child{border-top:none}
+.tx-row.xp-row{opacity:.55}
+.tx-row.bulk-sel{background:var(--Gl);margin:0 -8px;padding:7px 8px;border-radius:6px;border-top-color:transparent}
+.tx-left{flex:1;min-width:0;cursor:pointer}
+.tx-merchant{font-size:12.5px;color:var(--t);line-height:1.35;word-break:break-word}
+.tx-meta{font-size:10.5px;color:var(--t3);margin-top:1px}
+.tx-right{display:flex;align-items:center;gap:8px;flex-shrink:0}
+.tx-amt{font-size:12.5px;font-weight:600;white-space:nowrap}
+.tx-amt.pos{color:var(--G)}.tx-amt.neg{color:var(--t)}
+.tx-del{cursor:pointer;color:var(--t3);font-size:14px;line-height:1;padding:2px 4px}
+.tx-del:hover{color:var(--R)}
+
+.empty-row{padding:8px 0;font-size:11.5px;color:var(--t3);font-style:italic}
+.add-sub-row{padding:8px 0 4px;font-size:11px;color:var(--t3);cursor:pointer;border-top:1px dashed var(--bm);margin-top:4px}
+.add-sub-row:hover{color:var(--G)}
+
+/* P&L summary block — distinct treatment, looks like a totals row at the bottom of a statement */
+.pl-block{background:linear-gradient(135deg,var(--Gl) 0%,#fff 60%);border:1px solid rgba(26,122,74,.2);border-radius:var(--r);padding:14px 16px;margin-bottom:12px}
+.pl-block-title{font-size:11px;font-weight:600;color:var(--t3);letter-spacing:.06em;text-transform:uppercase;margin-bottom:8px}
+.pl-line{display:flex;justify-content:space-between;align-items:baseline;padding:5px 0;font-size:12.5px;color:var(--t2)}
+.pl-line-amt{font-family:'DM Mono',monospace;font-size:12.5px;color:var(--t)}
+.pl-line.total{margin-top:6px;padding-top:10px;border-top:1.5px solid rgba(26,122,74,.25);font-size:14px;font-weight:600;color:var(--t)}
+.pl-line.total .pl-line-amt{font-size:15px;font-weight:700}
+.pl-line.total .pl-line-amt.pos{color:var(--G)}
+.pl-line.total .pl-line-amt.neg{color:var(--R)}
+
+/* Tally-out section — visually distinct from main statement; explains why these are excluded from totals */
+.tally-section{background:#fcfaff;border:1px solid #e4dcf4;border-radius:var(--r);padding:14px 16px;margin-bottom:12px}
+.tally-hdr{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:10px;gap:10px}
+.tally-title{font-size:13px;font-weight:600;color:#4a2d8c}
+.tally-meta{font-size:11px;color:var(--t3)}
+.tally-explain{font-size:11.5px;color:var(--t2);line-height:1.5;margin-bottom:10px;padding:8px 10px;background:rgba(255,255,255,.6);border-radius:6px;border:1px solid rgba(74,45,140,.08)}
+.tally-pair{display:grid;grid-template-columns:1fr auto 1fr;gap:10px;align-items:center;padding:10px 0;border-top:1px dashed rgba(74,45,140,.15);font-size:11.5px}
+.tally-pair:first-of-type{border-top:none}
+.tally-pair-side{min-width:0}
+.tally-pair-merch{font-size:11.5px;color:var(--t);line-height:1.35;word-break:break-word}
+.tally-pair-meta{font-size:10px;color:var(--t3);margin-top:2px}
+.tally-pair-amt{font-family:'DM Mono',monospace;font-size:11.5px;font-weight:600}
+.tally-pair-amt.pos{color:var(--G)}.tally-pair-amt.neg{color:var(--R)}
+.tally-pair-arrow{font-size:14px;color:#a08bc4;font-weight:600;text-align:center}
+
+/* Inline recycle section — replaces the old Recycle tab. Only rendered when bin > 0. */
+.recycle-section{background:#fafafa;border:1px solid var(--bm);border-radius:var(--r);padding:14px 16px;margin-bottom:12px}
+.recycle-hdr{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:8px}
+.recycle-title{font-size:13px;font-weight:600;color:var(--t2)}
+.recycle-meta{font-size:11px;color:var(--t3)}
+
+/* Coverage diagnostic — per-file capture stats (helps user verify nothing was missed) */
+.coverage-block{background:var(--s);border:1px solid var(--b);border-radius:var(--rs);padding:11px 13px;margin-bottom:10px}
+.coverage-title{font-size:11px;font-weight:600;color:var(--t3);letter-spacing:.04em;text-transform:uppercase;margin-bottom:6px;display:flex;justify-content:space-between;align-items:center}
+.coverage-title-status{font-size:11px;color:var(--G);text-transform:none;letter-spacing:0;font-weight:500}
+.coverage-title-status.warn{color:var(--A)}
+.coverage-row{display:flex;justify-content:space-between;align-items:baseline;padding:4px 0;font-size:11.5px;border-top:1px dashed rgba(0,0,0,.05)}
+.coverage-row:first-of-type{border-top:none}
+.coverage-row-name{color:var(--t2);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1}
+.coverage-row-stats{font-family:'DM Mono',monospace;font-size:11px;color:var(--t)}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   CAPTURE AUDIT STRIP — always-visible per-file reconciliation:
+   bucket entries + tally-out + recycle = lines_detected (per file)
+   ═══════════════════════════════════════════════════════════════════════ */
+.audit-strip{background:var(--s);border:1px solid var(--b);border-radius:var(--rs);padding:11px 13px;margin-bottom:10px;border-left:3px solid var(--G)}
+.audit-strip.warn{border-left-color:var(--A);background:#fffbf2}
+.audit-hdr{display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;gap:10px}
+.audit-hdr-title{font-size:11px;font-weight:600;color:var(--t3);letter-spacing:.06em;text-transform:uppercase}
+.audit-hdr-status{font-size:11.5px;font-weight:500;color:var(--G);white-space:nowrap}
+.audit-strip.warn .audit-hdr-status{color:var(--A)}
+.audit-row{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:5px 0;font-size:11.5px;border-top:1px dashed rgba(0,0,0,.06)}
+.audit-row:first-of-type{border-top:none}
+.audit-row-name{color:var(--t2);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;display:flex;align-items:center;gap:6px}
+.audit-row-stats{font-family:'DM Mono',monospace;font-size:11px;color:var(--t);text-align:right;flex-shrink:0}
+.audit-row-status{margin-left:6px;font-weight:600;color:var(--G)}
+.audit-row.warn .audit-row-status{color:var(--A)}
+.audit-row-detail{font-family:'DM Sans',sans-serif;color:var(--t3);font-size:10.5px;font-weight:400}
+.audit-detail{font-size:10.5px;color:var(--t3);padding:2px 0 4px 22px;line-height:1.5;font-style:italic}
+.audit-skipped{margin-top:6px;padding:8px 10px;background:var(--Ab);border:1px solid rgba(146,96,10,.2);border-radius:6px}
+.audit-skipped-title{font-size:10.5px;font-weight:600;color:#5c3c06;letter-spacing:.02em;margin-bottom:5px}
+.audit-skipped-row{font-family:'DM Mono',monospace;font-size:10.5px;color:#5c3c06;padding:3px 0;line-height:1.45;border-top:1px dashed rgba(146,96,10,.15);word-break:break-word}
+.audit-skipped-row:first-of-type{border-top:none}
+.audit-footnote{margin-top:7px;padding-top:7px;border-top:1px dashed rgba(0,0,0,.06);font-size:10.5px;color:var(--t3);line-height:1.45}
+
+/* Seq tag — the "N-S" prefix on each transaction row, also used inline in audit strip */
+.seq-tag{display:inline-block;font-family:'DM Mono',monospace;font-size:10px;color:var(--t3);background:var(--bg);border:1px solid var(--b);border-radius:3px;padding:0 5px;margin-right:6px;vertical-align:1px;line-height:1.5;font-weight:500;letter-spacing:-.02em;white-space:nowrap}
+.seq-tag.inline{margin-right:0;vertical-align:0}
 /* Editable (double-tap-to-rename) hint on bucket labels */
 .editable-lbl{cursor:pointer;position:relative;transition:color .1s}
 .editable-lbl:hover{color:var(--G) !important}
@@ -255,6 +382,12 @@ html,body{height:100%;font-family:'DM Sans',sans-serif;background:var(--bg);colo
 /* "+ Add new sub" row at end of each group in the category picker sheet */
 .cat-opt-add{display:flex;align-items:center;gap:6px;padding:9px 12px;border-radius:var(--rs);cursor:pointer;font-size:12px;font-weight:500;color:var(--t3);border:1px dashed var(--bm);font-style:italic;margin-bottom:5px;transition:all .15s}
 .cat-opt-add:hover{background:var(--Gl);color:var(--G);border-color:var(--G);font-style:normal}
+/* Banner shown above the upload drop zone when adding more files to an existing session */
+.append-banner{background:var(--Gl);border:1px solid rgba(26,122,74,.25);border-left:3px solid var(--G);border-radius:6px;padding:11px 13px;font-size:12px;color:#144d31;margin-bottom:14px;line-height:1.55}
+.append-banner strong{font-weight:600}
+.append-banner .ab-links{margin-top:6px;display:flex;gap:14px;font-size:11px}
+.append-banner .ab-links a{color:var(--G);font-weight:500;cursor:pointer;text-decoration:none;border-bottom:1px dashed rgba(26,122,74,.4)}
+.append-banner .ab-links a:hover{color:#0d5a34;border-bottom-color:var(--G)}
 </style>
 </head>
 <body>
@@ -269,9 +402,10 @@ html,body{height:100%;font-family:'DM Sans',sans-serif;background:var(--bg);colo
     <div class="badge">Free · Claude AI</div>
   </div>
   <div class="ubody">
+    <div id="append-banner-slot"></div>
     <div class="uh">
-      <h2>Upload your statements</h2>
-      <p>PDF, image or CSV — any bank, any country. Wys reads every transaction, categorises it and shows your complete financial picture.</p>
+      <h2 id="upload-title">Upload your statements</h2>
+      <p id="upload-subtitle">PDF, image or CSV — any bank, any country. Wys reads every transaction, categorises it and shows your complete financial picture.</p>
     </div>
     <input type="file" id="fi" multiple accept=".pdf,image/*,.csv,.txt" style="display:none" onchange="addFiles(this.files)">
     <div class="dz" id="dz" onclick="document.getElementById('fi').click()"
@@ -333,43 +467,27 @@ html,body{height:100%;font-family:'DM Sans',sans-serif;background:var(--bg);colo
   </div>
 </div>
 
-<!-- ── DASHBOARD ── -->
+<!-- ── DASHBOARD (vertical statement layout) ── -->
 <div id="sd" class="screen">
   <div class="dh">
-    <!-- Slim top strip: period text + Select/Edit/New. Replaces the old avatar/name/pill row. -->
     <div class="dh-top">
       <div class="dh-period" id="dpd">—</div>
       <div class="dh-actions">
+        <button class="nb" id="btn-recycle" onclick="scrollToRecycle()" style="display:none">↺ <span id="rec-count">0</span></button>
         <button class="nb" id="btn-select" onclick="toggleBulkMode()"><svg width="10" height="10" viewBox="0 0 24 24" fill="none"><path d="M9 11l3 3L22 4" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg><span id="btn-select-lbl">Select</span></button>
-        <button class="nb" onclick="show('su')"><svg width="10" height="10" viewBox="0 0 24 24" fill="none"><path d="M3 12a9 9 0 109-9M3 3v6h6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>New</button>
+        <button class="nb" onclick="goToUploadMore()"><svg width="10" height="10" viewBox="0 0 24 24" fill="none"><path d="M3 12a9 9 0 109-9M3 3v6h6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>New</button>
       </div>
     </div>
-    <div class="mts" id="mts">
-      <div class="mt on" data-m="all" onclick="sM('all',this)"><div class="mv" id="mv-a">—</div><div class="mlbl" id="mlbl-a" data-lblkey="__all__">All</div></div>
-      <div class="mt" data-m="income" onclick="sM('income',this)"><div class="mv" id="mv-i">—</div><div class="mlbl" id="mlbl-i" data-lblkey="main:income">Income</div></div>
-      <div class="mt" data-m="expenses" onclick="sM('expenses',this)"><div class="mv" id="mv-e">—</div><div class="mlbl" id="mlbl-e" data-lblkey="main:expenses">Expenses</div></div>
-      <div class="mt" data-m="savings_investments" onclick="sM('savings_investments',this)"><div class="mv" id="mv-v">—</div><div class="mlbl" id="mlbl-v" data-lblkey="main:savings_investments">Savings</div></div>
-      <div class="mt" data-m="loans" onclick="sM('loans',this)"><div class="mv" id="mv-l">—</div><div class="mlbl" id="mlbl-l" data-lblkey="main:loans">Loans</div></div>
-      <div class="mt" data-m="pl" onclick="sM('pl',this)"><div class="mv">P&amp;L</div><div class="mlbl">Summary</div></div>
-      <div class="mt" id="mt-recycle" data-m="recycle" onclick="sM('recycle',this)" style="display:none"><div class="mv" id="mv-r">—</div><div class="mlbl">Recycle</div></div>
-    </div>
+    <!-- Month chips: clickable filter. "All" + one chip per month with that month's P/L. -->
+    <div class="month-chips" id="month-chips"></div>
   </div>
-  <div id="sb-all" class="sb" style="display:none"><div class="stab on" onclick="sS('all','list',this)">All transactions</div></div>
-  <div id="sb-income" class="sb" style="display:none"></div>
-  <div id="sb-expenses" class="sb" style="display:none"></div>
-  <div id="sb-savings_investments" class="sb" style="display:none"></div>
-  <div id="sb-loans" class="sb" style="display:none"></div>
-  <div id="sb-pl" class="sb" style="display:none"><div class="stab on" onclick="sS('pl','monthly',this)">Monthly</div><div class="stab" onclick="sS('pl','avg',this)">Averages</div></div>
-  <div id="sb-recycle" class="sb" style="display:none"><div class="stab on" onclick="sS('recycle','bin',this)">Deleted transactions</div></div>
   <div class="db" id="db"></div>
-  <!-- Bulk action bar (sticks to bottom when bulk mode + selection active) -->
   <div id="bulk-bar" class="bulk-bar">
     <div style="flex:1"><span id="bulk-bar-lbl">0 selected</span></div>
     <button class="bba" onclick="bulkMoveStart()">Move to…</button>
     <button class="bba bba-del" onclick="bulkDelete()">Delete</button>
     <button class="bba bba-ghost" onclick="bulkClear()">Clear</button>
   </div>
-  <!-- Recycle bin toast (brief confirmation after delete) -->
   <div id="recycle-toast" class="recycle-toast">
     <span class="recycle-toast-ic">🗑</span>
     <span id="recycle-toast-lbl">1 transaction moved to recycle bin</span>
@@ -382,13 +500,23 @@ const WORKER_URL = '/api/analyze';
 
 // ══ STATE ══
 let files=[], allTxns=[], plData=null;
-let cM='all', cS={all:'list',income:'direct',expenses:'food',savings_investments:'liquid',loans:'main',pl:'monthly',recycle:'bin'};
+// activeMonth: 'all' or 'YYYY-MM' — filters the statement to a specific month.
+// collapsedSubs: set of "cat:sub" keys that the user has manually collapsed.
+let activeMonth='all';
+let collapsedSubs=new Set();
 let activeFilter='all', editingIdx=null;
 let fileWarnings=[];
+// fileStats: per-file capture record. Each entry:
+//   { fileIdx, name, lines_detected, extracted (= total_seq from backend) }
+// fileIdx starts at 1 and increments per file across all upload sessions, so
+// even after appending more statements, every file has a stable unique index
+// matching the "N-S" prefix shown on each transaction row.
 let fileStats=[];
+let nextFileIdx=1; // monotonically increasing across upload sessions
 let insightData=null;
 let linesDetected=null;
-let xPairCount=0; // cross-statement pairs found during extraction
+let lastBatchAdded=0;
+let xPairCount=0;
 let toastTimer=null;
 let bulkMode=false;
 let bulkSelected=new Set();
@@ -511,22 +639,15 @@ function addSubBucket(cat, displayName){
   bucketLabels.sub[cat + ':' + uniqKey] = displayName;
   saveLabels();
   // Switch the dashboard to the new sub-tab if we're on this main tab
-  cS[cat] = uniqKey;
+  // (active sub auto-switch removed — vertical statement shows all subs)
   rerenderAll();
   return uniqKey;
 }
 function rerenderAll(){
   if(document.getElementById('sd').classList.contains('on')){
-    buildSubTabs();      // rebuild sub-tab strips (picks up new subs + renames)
-    refreshDashHeader(); // refresh main-tab labels/counts
-    renderDash();        // re-render current tab content
-    // Re-bind main-tab label editors (innerHTML changes may have cleared them)
-    document.querySelectorAll('.mlbl[data-lblkey]').forEach(el=>{
-      const key = el.dataset.lblkey;
-      if(!key || key === '__all__') return;
-      const [, cat] = key.split(':');
-      makeEditable(el, ()=>shortLbl(cat), (v)=>renameMainBucket(cat, v));
-    });
+    buildMonthChips();
+    refreshDashHeader();
+    renderStatement();
   }
   if(document.getElementById('sr').classList.contains('on')){
     renderReview();
@@ -697,6 +818,35 @@ function dedupCrossStatement(txns){
   return { pairs_found: pairId };
 }
 
+// ══════════════════════════════════════════════════════════════════════════
+// EXACT-MATCH DEDUPLICATION (across batches)
+// ══════════════════════════════════════════════════════════════════════════
+// When a user appends more statements, exactly-duplicate rows can slip in if
+// they accidentally re-upload the same file, or if two statements overlap a
+// day. We dedupe by (date, amount_cents, direction, merchant-prefix), keeping
+// the row with the LOWEST _id — that's the earlier upload, where the user
+// may have already done reclassifications we want to preserve.
+// Deleted rows (_deleted=true) are kept as tombstones and their hashes are
+// added to `seen` so a re-upload can't resurrect something the user intentionally
+// deleted. To un-delete a row, use the recycle bin — not re-uploading.
+function dedupeExact(txns){
+  const seen = new Set();
+  const sorted = [...txns].sort((a,b) => (a._id||0) - (b._id||0));
+  const kept = [];
+  for(const t of sorted){
+    const key = `${t.date}|${Math.round((Number(t.amount)||0)*100)}|${t.direction}|${(t.merchant||'').slice(0,30).toLowerCase()}`;
+    if(t._deleted){
+      seen.add(key);    // prevent future re-upload from resurrecting this row as live
+      kept.push(t);
+      continue;
+    }
+    if(seen.has(key)) continue;  // exact duplicate — skip silently
+    seen.add(key);
+    kept.push(t);
+  }
+  return kept;
+}
+
 // ══ ANALYSIS ══
 async function startAnalysis(){
   if(!files.length)return;
@@ -704,10 +854,23 @@ async function startAnalysis(){
     alert('⚠️ Worker URL not configured.\n\nLoading demo data instead.');
     loadDemo(); return;
   }
+  // DETECT APPEND MODE: if we already have txns from an earlier analysis, this
+  // run MERGES new data with the old. Prior classifications, renames, and the
+  // recycle bin are all preserved. Cross-statement pairing is re-run over the
+  // combined set so new txns can pair with old ones.
+  const isAppending = allTxns.length > 0;
+  const priorLiveCount = allTxns.filter(t => !t._deleted).length;
+
   show('sp');
+  // Reset per-file stats for this batch (in append mode we accumulate across batches)
+  if(!isAppending){ fileStats = []; }
   const estSecs=files.length*12;
   document.getElementById('ps').textContent=`Takes ~${estSecs}–${estSecs+30} seconds for ${files.length} file${files.length>1?'s':''}`;
-  const steps=files.map(f=>`Reading: ${f.name.slice(0,30)}`).concat(['Applying categorisation rules','Finding cross-statement pairs','Building review...']);
+  const steps=files.map(f=>`Reading: ${f.name.slice(0,30)}`).concat([
+    'Applying categorisation rules',
+    isAppending?`Merging with ${priorLiveCount} existing transactions`:'Finding cross-statement pairs',
+    'Building dashboard...',
+  ]);
   buildProg(steps); let idx=0;
   try{
     let all=[], skipped=[];
@@ -751,10 +914,28 @@ async function startAnalysis(){
           }
           const d=await res.json();
           if(d.error) throw new Error(d.message||d.error);
-          all.push(...(d.transactions||[]));
+          const fileTxns = d.transactions||[];
+          const fileTxnCount = fileTxns.length;
+          // Allocate a stable file index for THIS upload (1, 2, 3, ...). Every
+          // txn from this file gets stamped with _fileIdx, paired with its seq
+          // from the backend, gives the "N-S" prefix shown on each row.
+          const fileIdx = nextFileIdx++;
+          for(const t of fileTxns){ t._fileIdx = fileIdx; }
+          all.push(...fileTxns);
           if(typeof d.lines_detected==='number'){
             linesDetected=(linesDetected||0)+d.lines_detected;
           }
+          // Per-file capture record. extracted = highest seq number we got back
+          // (= total_seq, falls back to length). lines_detected is Claude's self-
+          // reported count of transaction-like rows in the source. skipped_lines
+          // is the raw verbatim text of any rows Claude could not extract.
+          fileStats.push({
+            fileIdx,
+            name: files[i].name,
+            extracted: typeof d.total_seq === 'number' ? d.total_seq : fileTxnCount,
+            lines_detected: (typeof d.lines_detected==='number') ? d.lines_detected : null,
+            skipped_lines: Array.isArray(d.skipped_lines) ? d.skipped_lines : [],
+          });
           if(d.warning){
             const detailStr=d.error_details?d.error_details.join(' | '):d.warning;
             skipped.push({name:files[i].name,reason:'partial',detail:detailStr,count:d.count||0});
@@ -794,35 +975,98 @@ async function startAnalysis(){
       }
       w.innerHTML=msg;
       document.querySelector('.pc').appendChild(w);
-      fileWarnings=skipped.slice();
+      // In append mode, APPEND to existing warnings rather than replace
+      fileWarnings = isAppending ? [...fileWarnings, ...skipped] : skipped.slice();
       await wait(4000);
-    } else {
+    } else if(!isAppending){
       fileWarnings=[];
     }
     if(!all.length){
       throw new Error('No transactions could be extracted. Please check your files and try again.');
     }
     setAct(idx+1);
-    document.getElementById('ph').textContent='Applying classification rules...';
+    document.getElementById('ph').textContent=isAppending?'Merging with your existing data...':'Applying classification rules...';
     await wait(400); setDone(idx+1); setAct(idx+2);
 
-    // Normalise + assign IDs
-    allTxns = all.map(migrateCat).map((t,i)=>({...t,_id:i,_deleted:false}));
+    // ── MERGE (or initial populate) ──
+    // Assign IDs that don't collide with existing ones
+    const nextId = allTxns.length ? (Math.max(...allTxns.map(t => Number(t._id)||0)) + 1) : 0;
+    const newTxns = all.map(migrateCat).map((t,i) => ({...t, _id: nextId + i, _deleted: false}));
+    if(isAppending){
+      const beforeLen = allTxns.length;
+      allTxns = dedupeExact([...allTxns, ...newTxns]);
+      lastBatchAdded = allTxns.length - beforeLen;
+      const dupesSkipped = newTxns.length - lastBatchAdded;
+      console.log(`Merged batch: ${lastBatchAdded} new txns added, ${dupesSkipped} exact duplicates skipped`);
+    } else {
+      allTxns = newTxns;
+      lastBatchAdded = newTxns.length;
+    }
 
-    // CROSS-STATEMENT DEDUP — run after all files are in, before showing the dashboard
+    // ── CROSS-STATEMENT PAIRING over the FULL combined set ──
+    // Reset _xPaired on everything (dedupCrossStatement does this internally) so
+    // previously-unpaired txns from batch 1 can now pair with batch 2 arrivals.
     document.getElementById('ph').textContent='Finding cross-statement pairs...';
-    const pairInfo = dedupCrossStatement(allTxns);
+    const pairInfo = dedupCrossStatement(allTxns.filter(t=>!t._deleted));
     xPairCount = pairInfo.pairs_found;
-    console.log(`Cross-statement pairing: ${xPairCount} pair(s) found`);
+    console.log(`Cross-statement pairing: ${xPairCount} pair(s) found across ${allTxns.filter(t=>!t._deleted).length} live txns`);
 
     await wait(300); setDone(idx+2); setAct(idx+3);
     document.getElementById('ph').textContent='Building your dashboard...';
     await wait(300); setDone(idx+3);
+    // Clear the file-picker for next time (we've consumed these)
+    files = [];
     await buildDashboard();
   }catch(e){
     document.getElementById('perr').style.display='block';
     document.getElementById('perr-msg').textContent=e.message;
     document.getElementById('ph').textContent='Failed';
+  }
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+// "NEW" / "ADD MORE" FLOW
+// ══════════════════════════════════════════════════════════════════════════
+// When the user clicks the "New" button on the dashboard, we take them back
+// to the upload screen WITH THEIR EXISTING DATA INTACT. The next analysis
+// run will merge new transactions into allTxns rather than replacing them.
+// A subtle banner on the upload screen makes this append behavior explicit.
+function goToUploadMore(){
+  // Reset the file-picker for the new batch only — keep allTxns, recycle bin,
+  // bucket renames, everything else.
+  files = [];
+  renderFiles();
+  // Clear the <input type=file> value so selecting the same filename again works
+  const fi = document.getElementById('fi');
+  if(fi) fi.value = '';
+  // Hide any stale error state on the processing screen
+  const perr = document.getElementById('perr');
+  if(perr) perr.style.display = 'none';
+  // Show contextual banner
+  updateUploadScreenBanner();
+  show('su');
+}
+function updateUploadScreenBanner(){
+  const slot = document.getElementById('append-banner-slot');
+  const titleEl = document.getElementById('upload-title');
+  const subEl = document.getElementById('upload-subtitle');
+  if(!slot) return;
+  const active = allTxns.filter(t => !t._deleted).length;
+  if(active > 0){
+    if(titleEl) titleEl.textContent = 'Add more statements';
+    if(subEl) subEl.textContent = 'Upload additional PDFs, images, or CSVs. They will be merged into your existing data — no prior work is lost.';
+    slot.innerHTML = `
+      <div class="append-banner">
+        <div><strong>Merging into existing data</strong> — you have ${active} transaction${active===1?'':'s'} already sorted. New uploads will be added, duplicates will be skipped automatically, and cross-statement pairs will be re-checked across everything.</div>
+        <div class="ab-links">
+          <a onclick="show('sd')">← Back to dashboard (don't add anything)</a>
+        </div>
+      </div>`;
+  } else {
+    // Fresh state — restore default copy, remove banner
+    if(titleEl) titleEl.textContent = 'Upload your statements';
+    if(subEl) subEl.textContent = 'PDF, image or CSV — any bank, any country. Wys reads every transaction, categorises it and shows your complete financial picture.';
+    slot.innerHTML = '';
   }
 }
 
@@ -929,7 +1173,8 @@ function restoreFromRecycle(id){
   const active=allTxns.filter(x=>!x._deleted);
   plData=computePL(active);
   refreshDashHeader();
-  renderDash();
+  buildMonthChips();
+  renderStatement();
 }
 function restoreAllFromRecycle(){
   const deleted=allTxns.filter(x=>x._deleted);
@@ -939,7 +1184,8 @@ function restoreAllFromRecycle(){
   const active=allTxns.filter(x=>!x._deleted);
   plData=computePL(active);
   refreshDashHeader();
-  renderDash();
+  buildMonthChips();
+  renderStatement();
 }
 
 // ══ BULK SELECT ══
@@ -950,7 +1196,8 @@ function toggleBulkMode(){
   if(lbl) lbl.textContent=bulkMode?'Done':'Select';
   refreshDashHeader();
   refreshBulkBar();
-  renderDash();
+  buildMonthChips();
+  renderStatement();
 }
 function bulkToggleRow(id,ev){
   if(ev){ev.stopPropagation();}
@@ -974,7 +1221,8 @@ function refreshBulkBar(){
 function bulkClear(){
   bulkSelected.clear();
   refreshBulkBar();
-  renderDash();
+  buildMonthChips();
+  renderStatement();
 }
 function bulkDelete(){
   if(!bulkSelected.size) return;
@@ -985,7 +1233,8 @@ function bulkDelete(){
   const active=allTxns.filter(x=>!x._deleted);
   if(plData) plData=computePL(active);
   refreshDashHeader();
-  renderDash();
+  buildMonthChips();
+  renderStatement();
 }
 function bulkMoveStart(){
   if(!bulkSelected.size) return;
@@ -1006,7 +1255,8 @@ function bulkAssign(cat,sub){
   const active=allTxns.filter(x=>!x._deleted);
   if(plData) plData=computePL(active);
   refreshDashHeader();
-  renderDash();
+  buildMonthChips();
+  renderStatement();
 }
 
 // ══ SHEET ══
@@ -1103,7 +1353,8 @@ function assignCat(cat,sub){
     const active=allTxns.filter(x=>!x._deleted);
     plData=computePL(active);
     refreshDashHeader();
-    renderDash();
+    buildMonthChips();
+  renderStatement();
   } else {
     renderReview();
   }
@@ -1114,48 +1365,21 @@ function closeSheet(e){
   editingIdx=null;
 }
 
-// ══ SUB-TAB BUILDERS — dynamic so renames and new subs reflect immediately ══
-// Single-click anywhere on a .stab switches to that sub-tab. Double-click the
-// label specifically puts it into inline edit mode (the tab switches first, then
-// the input appears — that's expected because editing the label you're viewing
-// is the natural flow).
-function buildSubTabs(){
-  const build = (main) => {
-    const subs = getSubKeys(main);
-    const pills = subs.map((sub) =>
-      `<div class="stab ${cS[main]===sub?'on':''}" data-sub="${sub}" onclick="sS('${main}','${sub}',this)">
-         <span class="editable-lbl" data-sublbl="${main}:${sub}">${subLbl(main,sub)}</span>
-       </div>`
-    ).join('');
-    // Add pill at end: "+ Add" → inline input → creates new sub
-    const addPill = `<div class="stab stab-add" data-addmain="${main}" onclick="startAddSub('${main}',this,event)">+ Add</div>`;
-    return pills + addPill;
-  };
-  document.getElementById('sb-income').innerHTML = build('income');
-  document.getElementById('sb-expenses').innerHTML = build('expenses');
-  document.getElementById('sb-savings_investments').innerHTML = build('savings_investments');
-  document.getElementById('sb-loans').innerHTML = build('loans');
-  // Bind double-tap rename on each sub-tab label. makeEditable uses dblclick +
-  // touchend-double-tap; single taps fall through to the parent .stab's onclick.
-  document.querySelectorAll('.stab .editable-lbl[data-sublbl]').forEach(el=>{
-    const [cat, sub] = el.dataset.sublbl.split(':');
-    makeEditable(el, ()=>subLbl(cat, sub), (v)=>renameSubBucket(cat, sub, v));
-  });
-}
-
-// "+ Add sub" inline editor — replaces the pill with an input, commits on
-// blur/Enter, cancels on Escape. Triggered from the sub-tab strip AND from
-// inside the category-picker sheet.
+// ══ "+ Add sub" INLINE INPUT ══════════════════════════════════════════════
+// Replaces the pill/row with a text input. On commit (Enter / blur with text)
+// addSubBucket() creates the new sub and rerenderAll fires automatically.
+// Called from the bottom of each main section in the statement and from inside
+// the category-picker sheet.
 function startAddSub(main, el, ev){
   if(ev){ ev.stopPropagation(); }
   if(el.querySelector('input')) return;
   const origHtml = el.innerHTML;
   const input = document.createElement('input');
   input.type='text';
-  input.placeholder='New sub name';
+  input.placeholder=`New sub under ${mainLbl(main)}`;
   input.className='editable-input';
   input.setAttribute('maxlength','30');
-  input.style.minWidth='110px';
+  input.style.minWidth='140px';
   el.innerHTML='';
   el.appendChild(input);
   input.focus();
@@ -1184,29 +1408,21 @@ async function buildDashboard(){
   if(!active.length) return;
   plData=computePL(active);
   show('sd');
+  // If activeMonth is set to a month that's no longer in the data, fall back to 'all'
+  if(activeMonth !== 'all' && !plData.ym_ordered.includes(activeMonth)){
+    activeMonth = 'all';
+  }
+  buildMonthChips();
   refreshDashHeader();
-  buildSubTabs();
-  // Wire double-tap rename on the main-tab labels too
-  document.querySelectorAll('.mlbl[data-lblkey]').forEach(el=>{
-    const key = el.dataset.lblkey;
-    if(!key || key === '__all__') return;
-    const [, cat] = key.split(':');
-    makeEditable(el, ()=>shortLbl(cat), (v)=>renameMainBucket(cat, v));
-  });
-  document.querySelectorAll('.mt').forEach(t=>t.classList.remove('on'));
-  document.querySelector('.mt').classList.add('on');
-  cM='all'; cS.all='list';
-  document.querySelectorAll('[id^=sb-]').forEach(sb=>sb.style.display='none');
-  document.getElementById('sb-all').style.display='flex';
   insightData=null;
-  renderDash();
+  renderStatement();
   fetchInsight(active).then(ins=>{
     insightData=ins;
-    renderDash();
+    renderStatement();
   }).catch(err=>{
     console.warn('Insight fetch failed:',err);
     insightData={headline:null};
-    renderDash();
+    renderStatement();
   });
 }
 
@@ -1319,40 +1535,27 @@ function buildMonthlyStrip(txns,plDataRef){
   return `<div class="mt-strip">${cells}</div>`;
 }
 
-// Re-compute dashboard header counts + values
+// Refresh the slim header: period text + recycle button visibility
 function refreshDashHeader(){
   const active=allTxns.filter(t=>!t._deleted);
   if(!active.length||!plData) return;
-  const incTot=plData.totals.income, expTot=plData.totals.expenses;
-  const invTot=plData.totals.savings_investments, loanTot=plData.totals.loans;
   const pairedCount = active.filter(t=>t._xPaired).length;
   const pairNote = pairedCount ? ` · ${pairedCount/2} pair${pairedCount/2===1?'':'s'} netted` : '';
   document.getElementById('dpd').textContent = `${plData.period_label.replace(/^Total · /,'')} · ${active.length} transactions${pairNote}`;
-  // Main tab values (exclude paired — already handled inside computePL)
-  const cnt={
-    all: active.filter(t=>!t._xPaired).length,
-    income: active.filter(t=>t.cat==='income'&&!t._xPaired).length,
-    expenses: active.filter(t=>t.cat==='expenses'&&!t._xPaired).length,
-    savings_investments: active.filter(t=>t.cat==='savings_investments'&&!t._xPaired).length,
-    loans: active.filter(t=>t.cat==='loans'&&!t._xPaired).length,
-  };
-  document.getElementById('mv-a').textContent=''+cnt.all;
-  document.getElementById('mv-i').textContent='AED '+fK(incTot);
-  document.getElementById('mv-e').textContent='AED '+fK(expTot);
-  document.getElementById('mv-v').textContent='AED '+fK(invTot);
-  document.getElementById('mv-l').textContent='AED '+fK(loanTot);
-  document.getElementById('mlbl-a').textContent='All';
-  document.getElementById('mlbl-i').textContent=`${shortLbl('income')} · ${cnt.income}`;
-  document.getElementById('mlbl-e').textContent=`${shortLbl('expenses')} · ${cnt.expenses}`;
-  document.getElementById('mlbl-v').textContent=`${shortLbl('savings_investments')} · ${cnt.savings_investments}`;
-  document.getElementById('mlbl-l').textContent=`${shortLbl('loans')} · ${cnt.loans}`;
+  // Recycle button — only visible when bin has items
   const binCount=allTxns.filter(t=>t._deleted).length;
-  const recycleTab=document.getElementById('mt-recycle');
-  if(recycleTab){
-    recycleTab.style.display=binCount>0?'block':'none';
-    const mvr=document.getElementById('mv-r');
-    if(mvr) mvr.textContent=''+binCount;
+  const recycleBtn=document.getElementById('btn-recycle');
+  if(recycleBtn){
+    recycleBtn.style.display = binCount>0 ? '' : 'none';
+    const rc=document.getElementById('rec-count');
+    if(rc) rc.textContent = ''+binCount;
   }
+}
+
+// Smooth-scroll the inline recycle section into view (button at the top of the dashboard)
+function scrollToRecycle(){
+  const el=document.getElementById('inline-recycle');
+  if(el) el.scrollIntoView({behavior:'smooth',block:'start'});
 }
 
 function dashDelete(id){
@@ -1361,7 +1564,8 @@ function dashDelete(id){
   const active=allTxns.filter(x=>!x._deleted);
   if(plData) plData=computePL(active);
   refreshDashHeader();
-  renderDash();
+  buildMonthChips();
+  renderStatement();
 }
 function toggleWarnDetail(){
   const d=document.getElementById('wbnr-detail');
@@ -1409,64 +1613,99 @@ function detectSubscriptions(txns){
   return results.sort((a,b)=>b.monthly-a.monthly);
 }
 
-// ══ DASHBOARD RENDER ══
-function sM(id,el){
-  cM=id;
-  document.querySelectorAll('.mt').forEach(t=>t.classList.remove('on'));el.classList.add('on');
-  ['all','income','expenses','savings_investments','loans','pl','recycle'].forEach(k=>{const sb=document.getElementById('sb-'+k);if(sb)sb.style.display=k===id?'flex':'none';});
-  renderDash();
-}
-function sS(main,sub,el){cS[main]=sub;document.querySelectorAll(`#sb-${main} .stab`).forEach(t=>t.classList.remove('on'));el.classList.add('on');renderDash();}
+// ══ DASHBOARD RENDER (vertical statement layout) ══
+// ═══════════════════════════════════════════════════════════════════════════
+// MONTH CHIPS — clickable filter at the top of the dashboard.
+// Builds one chip per month present in the data + an "All" chip on the left.
+// Each chip shows the month label and that month's net P/L (green if positive,
+// red if negative). Clicking sets activeMonth and re-renders the statement.
+// ═══════════════════════════════════════════════════════════════════════════
+function buildMonthChips(){
+  const el = document.getElementById('month-chips');
+  if(!el || !plData) return;
 
-function renderDash(){
-  const d=plData; if(!d||!allTxns.length) return;
-  const txns=allTxns.filter(t=>!t._deleted);
-  const el=document.getElementById('db'), m=cM, s=cS[m]; let h='';
+  // First, compute net P/L per month including ALL of period for the "All" chip
+  const totalNet = plData.totals.income - plData.totals.expenses
+                 - plData.totals.savings_investments - plData.totals.loans;
 
-  // Respect direction when summing within a category
-  function catTxns(cat,sub){return txns.filter(t=>t.cat===cat&&(!sub||sub==='all'||t.sub===sub));}
-  function catTxnsActive(cat,sub){return catTxns(cat,sub).filter(t=>!t._xPaired);}
-  function sumAmtDirected(arr, dir){return arr.filter(t=>!t._xPaired && (!dir||t.direction===dir)).reduce((a,t)=>a+(Number(t.amount)||0),0);}
+  // Decide on a uniform unit (k or full) for the strip so all chips use same format
+  const allValues = [Math.abs(totalNet), ...plData.pl_months.map(m => Math.abs(m.inc - m.exp - m.sav - m.loans))];
+  const useK = allValues.some(v => v >= 1000);
+  const fmtChip = (n) => {
+    const abs = Math.abs(n);
+    const sign = n >= 0 ? '+' : '−';
+    if(useK){ return sign + (abs >= 1000 ? Math.round(abs/1000) + 'k' : Math.round(abs)); }
+    return sign + Math.round(abs).toLocaleString();
+  };
 
-  function irx(t){
-    const color=t.direction==='CR'?'G':(t.cat==='loans'?'B':(t.cat==='savings_investments'?'B':'R'));
-    const sign=t.direction==='CR'?'+':'−';
-    const dateStr=(t.date||'').slice(5).replace('-','/');
-    const catInfo=CATS[t.cat];
-    const catLbl=catInfo?mainLbl(t.cat):t.cat;
-    const subLabel=t.sub?' · '+subLbl(t.cat,t.sub):'';
-    const xpBadge=t._xPaired?'<span class="xp-badge" title="Paired across statements — nets to zero in totals.">⇅ paired</span>':'';
-    const stfBadge=t.possibly_self_transfer?'<span class="stf-badge" title="This looks like a self-transfer.">↔ self?</span>':'';
-    const selected=bulkSelected.has(t._id);
-    if(bulkMode){
-      return `<div class="ir ${selected?'bulk-sel':''} ${t._xPaired?'xp-row':''}" id="dr-${t._id}" onclick="bulkToggleRow(${t._id},event)" style="cursor:pointer">
-        <div class="bulk-cb ${selected?'on':''}"></div>
-        <div class="il" style="flex:1;min-width:0">
-          <div class="inm">${t.merchant}${xpBadge}${stfBadge}</div>
-          <div class="is">${dateStr} · ${catLbl}${subLabel}</div>
-        </div>
-        <div class="ira"><div class="ia c${color}">${sign}AED ${fmt(t.amount)}</div></div>
-      </div>`;
-    }
-    return `<div class="ir ${t._xPaired?'xp-row':''}" id="dr-${t._id}">
-      <div class="il" style="cursor:pointer" onclick="openSheet(${t._id})">
-        <div class="inm">${t.merchant}${xpBadge}${stfBadge}</div>
-        <div class="is">${dateStr} · ${catLbl}${subLabel}</div>
-      </div>
-      <div class="ira" style="display:flex;align-items:center;gap:8px">
-        <div class="ia c${color}">${sign}AED ${fmt(t.amount)}</div>
-        <div onclick="dashDelete(${t._id})" style="cursor:pointer;color:var(--t3);font-size:15px;padding:4px 2px;line-height:1" title="Remove">×</div>
-      </div>
+  let html = '';
+  // "All" chip first
+  const allCls = activeMonth === 'all' ? 'on' : '';
+  const allColor = totalNet >= 0 ? 'pos' : 'neg';
+  html += `<div class="mchip ${allCls}" data-m="all" onclick="setActiveMonth('all')">
+    <div class="mchip-lbl">All</div>
+    <div class="mchip-pl ${allColor}">${fmtChip(totalNet)}</div>
+  </div>`;
+
+  // One chip per month
+  const MO = {'01':'Jan','02':'Feb','03':'Mar','04':'Apr','05':'May','06':'Jun','07':'Jul','08':'Aug','09':'Sep','10':'Oct','11':'Nov','12':'Dec'};
+  for(const pm of plData.pl_months){
+    const net = pm.inc - pm.exp - pm.sav - pm.loans;
+    const cls = activeMonth === pm.ym ? 'on' : '';
+    const color = net >= 0 ? 'pos' : 'neg';
+    const [yr, mo] = pm.ym.split('-');
+    const monthLbl = `${MO[mo] || mo} '${(yr || '').slice(2)}`;
+    html += `<div class="mchip ${cls}" data-m="${pm.ym}" onclick="setActiveMonth('${pm.ym}')">
+      <div class="mchip-lbl">${monthLbl}</div>
+      <div class="mchip-pl ${color}">${fmtChip(net)}</div>
     </div>`;
   }
+  el.innerHTML = html;
+}
 
+function setActiveMonth(ym){
+  activeMonth = ym;
+  buildMonthChips();
+  renderStatement();
+  // Scroll back to top so the user sees the freshly-filtered statement
+  document.getElementById('db')?.scrollIntoView({behavior:'smooth', block:'start'});
+}
+
+function toggleSubsection(catSub){
+  if(collapsedSubs.has(catSub)) collapsedSubs.delete(catSub);
+  else collapsedSubs.add(catSub);
+  renderStatement();
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// VERTICAL STATEMENT RENDERER
+// ═══════════════════════════════════════════════════════════════════════════
+// Replaces the old renderDash() which switched between horizontal tabs.
+// Now everything renders in one continuous vertical scroll: file warnings →
+// insight → coverage → 4 main sections (Income / Expenses / Savings / Loans)
+// → P&L summary → Tally-out (paired) → Recycle (if any).
+// activeMonth filters the txn pool. Sub-buckets render as collapsible groups.
+function renderStatement(){
+  if(!plData || !allTxns.length) return;
+  const el = document.getElementById('db');
+
+  // Filter by activeMonth. Note: paired txns are excluded from totals everywhere
+  // but still rendered (in the Tally-out section) so the user can audit them.
+  const all = allTxns.filter(t => !t._deleted);
+  const inPeriod = activeMonth === 'all'
+    ? all
+    : all.filter(t => (t.date || '').slice(0, 7) === activeMonth);
+
+  let h = '';
+
+  // ── 1. File warnings (persistent banner) ──
   if(fileWarnings && fileWarnings.length){
-    const byType=fileWarnings.reduce((a,w)=>{a[w.reason]=(a[w.reason]||0)+1;return a;},{});
-    const parts=[];
+    const byType = fileWarnings.reduce((a,w) => { a[w.reason] = (a[w.reason]||0)+1; return a; }, {});
+    const parts = [];
     if(byType.timeout||byType.toolarge) parts.push(`${byType.timeout||byType.toolarge} file${(byType.timeout||byType.toolarge)>1?'s':''} too large`);
     if(byType.partial) parts.push(`${byType.partial} file${byType.partial>1?'s':''} partially processed`);
     if(byType.error) parts.push(`${byType.error} file${byType.error>1?'s':''} failed`);
-    h+=`<div class="wbnr" onclick="toggleWarnDetail()" id="wbnr">
+    h += `<div class="wbnr" onclick="toggleWarnDetail()" id="wbnr">
       <div style="flex:1">⚠ ${parts.join(' · ')} — data may be incomplete. Tap for details.</div>
       <div style="color:var(--t3);font-size:10px">▼</div>
     </div>
@@ -1476,183 +1715,404 @@ function renderDash(){
     </div>`;
   }
 
-  if(insightData===null){
-    h+=`<div class="insight-card loading">
-      <div class="ins-hd">💡 Finding a pattern…</div>
-    </div>`;
-  } else if(insightData&&insightData.headline){
-    const toneCls=insightData.tone==='warning'?'warn':(insightData.tone==='encouraging'?'good':'');
-    h+=`<div class="insight-card ${toneCls}">
+  // ── 2. Insight card ──
+  if(insightData === null){
+    h += `<div class="insight-card loading"><div class="ins-hd">💡 Finding a pattern…</div></div>`;
+  } else if(insightData && insightData.headline){
+    const toneCls = insightData.tone==='warning' ? 'warn' : (insightData.tone==='encouraging' ? 'good' : '');
+    h += `<div class="insight-card ${toneCls}">
       <div class="ins-hd">${insightData.headline}</div>
       ${insightData.detail?`<div class="ins-dt">${insightData.detail}</div>`:''}
     </div>`;
   }
 
-  if(m==='all'){
-    const sorted=[...txns].sort((a,b)=>(b.date||'').localeCompare(a.date||''));
-    const totCr=txns.filter(t=>t.direction==='CR'&&!t._xPaired).reduce((a,t)=>a+(Number(t.amount)||0),0);
-    const totDr=txns.filter(t=>t.direction==='DR'&&!t._xPaired).reduce((a,t)=>a+(Number(t.amount)||0),0);
-    const pairedCount=txns.filter(t=>t._xPaired).length;
-    h+=stats2([
-      {l:d.period_label||'All',v:''+txns.length+' txns',c:''},
-      {l:'Money in (net)',v:'AED '+fmt(totCr),c:'G'},
-      {l:'Money out (net)',v:'AED '+fmt(totDr),c:'R'},
-    ]);
-    // Cross-statement pairing notice
-    if(pairedCount>0){
-      h+=`<div class="ins iB" style="font-size:11.5px;margin-top:0;margin-bottom:10px">⇅ <strong>${pairedCount/2} cross-statement pair${pairedCount/2===1?'':'s'}</strong> detected (${pairedCount} rows). These represent the same money movement recorded on two statements — they're dimmed below and excluded from totals so you don't double-count self-transfers and card-bill payments.</div>`;
-    }
-    if(linesDetected!=null){
-      const extracted=allTxns.length;
-      if(linesDetected===extracted){
-        h+=`<div style="font-size:11px;color:var(--G);background:var(--Gl);border:1px solid rgba(26,122,74,.2);border-radius:6px;padding:7px 11px;margin-bottom:10px;display:flex;align-items:center;gap:6px"><span>✓</span><span>All ${extracted} transaction lines detected in your statements were extracted.</span></div>`;
-      } else if(linesDetected>extracted){
-        const diff=linesDetected-extracted;
-        h+=`<div style="font-size:11px;color:#5c3c06;background:var(--Ab);border:1px solid rgba(146,96,10,.3);border-radius:6px;padding:7px 11px;margin-bottom:10px;display:flex;align-items:center;gap:6px"><span>⚠</span><span>${extracted} of ${linesDetected} transaction lines extracted — ${diff} skipped (duplicates or unreadable rows).</span></div>`;
-      }
-    }
-    if(d.pl_months.length>=2){
-      h+=secl('Monthly activity (net)');
-      h+=`<div class="mt-strip">${d.pl_months.map(pm=>{
-        const net=pm.inc-pm.exp-pm.sav-pm.loans;
-        return `<div class="mt-cell"><div class="mt-cell-m">${pm.m.split(' ')[0]}</div><div class="mt-cell-v" style="color:${net>=0?'var(--G)':'var(--R)'}">${net>=0?'+':'−'}${fK2(Math.abs(net))}</div></div>`;
-      }).join('')}</div>`;
-    }
-    h+=secl('All transactions (newest first) · tap to reassign · × to delete');
-    h+=`<div class="ig">`;
-    if(!sorted.length){h+=`<div style="padding:14px 0;text-align:center;font-size:12px;color:var(--t3)">No transactions</div>`;}
-    sorted.forEach(t=>{h+=irx(t);});
-    h+=`</div>`;
+  // ── 3. Capture audit strip (always visible) ──
+  // For each file: bucket entries (live, not paired) + tally-out entries
+  // (paired) + recycle entries should equal lines_detected. If they do,
+  // every line from the source PDF is accounted for somewhere in the app.
+  if(fileStats && fileStats.length){
+    h += renderAuditStrip();
   }
-  else if(m==='income'){
-    const active = catTxns('income', s);
-    const totCr = sumAmtDirected(active, 'CR');
-    const totDr = sumAmtDirected(active, 'DR');
-    const net = totCr - totDr;
-    const currentLbl = subLbl('income', s);
-    h+=stats2([{l:'Net total',v:'AED '+fmt(net),c:'G'},{l:'Monthly avg',v:'AED '+fmt(Math.round(net/d.months))},{l:'Transactions',v:''+active.length}]);
-    const strip=buildMonthlyStrip(active.filter(t=>t.direction==='CR'),d);
-    if(strip){ h+=secl(`${currentLbl} by month`); h+=strip; }
-    h+=secl(`${currentLbl} · tap to reassign · × to delete`);
-    h+=`<div class="ig">`;
-    if(!active.length) h+=`<div style="padding:14px 0;text-align:center;font-size:12px;color:var(--t3)">No transactions</div>`;
-    active.sort((a,b)=>(b.date||'').localeCompare(a.date||'')).forEach(t=>{h+=irx(t);});
-    h+=`</div>`;
+
+  // ── 4. Four main sections (Income, Expenses, Savings, Loans) ──
+  // Each section: header with total → sub-bucket groups → "+ Add sub" row.
+  // Paired txns are excluded from section totals but shown in Tally-out below.
+  for(const cat of ['income', 'expenses', 'savings_investments', 'loans']){
+    h += renderMainSection(cat, inPeriod);
   }
-  else if(m==='expenses'){
-    const active = catTxns('expenses', s);
-    const tot = sumAmtDirected(active, 'DR') - sumAmtDirected(active, 'CR');
-    const subLabel = subLbl('expenses', s);
-    h+=stats2([{l:d.period_label||'Total',v:'AED '+fmt(tot),c:'R'},{l:'Monthly avg',v:'AED '+fmt(Math.round(tot/d.months))},{l:'Transactions',v:''+active.length}]);
-    const strip=buildMonthlyStrip(active.filter(t=>t.direction==='DR'),d);
-    if(strip){ h+=secl(`${subLabel} by month`); h+=strip; }
-    if(s==='misc'){
-      const subs=detectSubscriptions(txns);
-      if(subs.length){
-        const subsTotal=subs.reduce((a,s)=>a+s.monthly,0);
-        h+=secl(`🔁 Recurring subscriptions · ~AED ${fmt(subsTotal)}/mo total`);
-        h+=`<div class="ig">`;
-        subs.forEach(sub=>{
-          h+=`<div class="ir"><div class="il"><div class="inm">${sub.merchant}</div><div class="is">${sub.count}× over ${sub.span} · ~AED ${fmt(sub.monthly)}/mo · last ${sub.lastDate}</div></div><div class="ira"><div class="ia cR">AED ${fmt(sub.total)}</div><div class="ip">total</div></div></div>`;
-        });
-        h+=`</div>`;
-      }
-    }
-    h+=secl(`${subLabel} · tap to reassign · × to delete`);
-    h+=`<div class="ig">`;
-    const sorted=active.sort((a,b)=>(b.date||'').localeCompare(a.date||''));
-    sorted.forEach(t=>{h+=irx(t);});
-    if(!sorted.length) h+=`<div style="padding:14px 0;text-align:center;font-size:12px;color:var(--t3)">No transactions</div>`;
-    h+=`</div>`;
+
+  // ── 5. P&L summary block (always shown, reflects activeMonth filter) ──
+  h += renderPLBlock(inPeriod);
+
+  // ── 6. Tally-out (cross-statement pairs in the active period) ──
+  const pairedInPeriod = inPeriod.filter(t => t._xPaired);
+  if(pairedInPeriod.length){
+    h += renderTallyOut(pairedInPeriod);
   }
-  else if(m==='savings_investments'){
-    const sub=s||'liquid';
-    const active = catTxns('savings_investments', sub);
-    const tot = sumAmtDirected(active, 'DR') - sumAmtDirected(active, 'CR');
-    const subLabel = subLbl('savings_investments', sub);
-    h+=stats2([{l:d.period_label||'Total',v:'AED '+fmt(tot),c:'B'},{l:'Monthly avg',v:'AED '+fmt(Math.round(tot/d.months))},{l:'Plans',v:''+new Set(active.map(t=>t.merchant)).size}]);
-    const strip=buildMonthlyStrip(active.filter(t=>t.direction==='DR'),d);
-    if(strip){ h+=secl(`${subLabel} by month`); h+=strip; }
-    h+=secl(`${subLabel} · tap to reassign · × to delete`);
-    h+=`<div class="ig">`;
-    if(!active.length) h+=`<div style="padding:14px 0;text-align:center;font-size:12px;color:var(--t3)">No transactions${sub==='liquid'?' — tap "↔ self?" flagged items on other tabs to move them here':''}</div>`;
-    active.sort((a,b)=>(b.date||'').localeCompare(a.date||'')).forEach(t=>{h+=irx(t);});
-    h+=`</div>`;
+
+  // ── 7. Recycle (only if bin > 0) ──
+  const deleted = allTxns.filter(t => t._deleted);
+  if(deleted.length){
+    h += renderRecycleSection(deleted);
   }
-  else if(m==='loans'){
-    const loansAll=catTxns('loans');  // includes paired
-    const loansActive=loansAll.filter(t=>!t._xPaired);
-    const pairedCount=loansAll.filter(t=>t._xPaired).length;
-    const drTot=loansActive.filter(t=>t.direction==='DR').reduce((a,t)=>a+t.amount,0);
-    const salaryMonthly=d.totals.income/(d.months||1)||1;
-    h+=stats2([{l:d.period_label||'Total',v:'AED '+fmt(drTot),c:'B'},{l:'Monthly',v:'AED '+fmt(Math.round(drTot/d.months))},{l:'% income',v:Math.round(drTot/d.months/salaryMonthly*100)+'%'}]);
-    const strip=buildMonthlyStrip(loansActive.filter(t=>t.direction==='DR'),d);
-    if(strip){ h+=secl('Payments by month'); h+=strip; }
-    if(pairedCount>0){
-      h+=`<div class="ins iB" style="font-size:11px">⇅ ${pairedCount/2} payment${pairedCount/2>1?'s':''} appear on both statements (bank debit + card credit). Shown dimmed; only one side counts toward the total.</div>`;
-    }
-    h+=secl('Payments · tap to reassign · × to delete');
-    h+=`<div class="ig">`;
-    if(!loansAll.length) h+=`<div style="padding:14px 0;text-align:center;font-size:12px;color:var(--t3)">No transactions</div>`;
-    loansAll.sort((a,b)=>(b.date||'').localeCompare(a.date||'')).forEach(t=>{h+=irx(t);});
-    h+=`</div>`;
-  }
-  else if(m==='pl'){
-    if(s==='monthly'){
-      h+=`<div class="af"><span>P&L</span> = <span>${shortLbl('income')}</span> − <span>${shortLbl('expenses')}</span> − <span>${shortLbl('savings_investments')}</span> − <span>${shortLbl('loans')}</span></div>`;
-      h+=`<div style="overflow-x:auto"><table class="plt" style="min-width:280px"><thead><tr><th>Month</th><th>Inc.</th><th>Exp.</th><th>S&amp;I</th><th>Loans</th><th>P&L</th></tr></thead><tbody>`;
-      let grand=0;
-      d.pl_months.forEach(r=>{
-        const pl=r.inc-r.exp-r.sav-r.loans;grand+=pl;
-        h+=`<tr><td>${r.m}</td><td class="pd2">${fK2(r.inc)}</td><td class="pd2">${fK2(r.exp)}</td><td class="pd2">${fK2(r.sav)}</td><td class="pd2">${fK2(r.loans)}</td><td class="${pl>=0?'pp':'pn'}">${pl>=0?'+':''}${fK2(Math.abs(pl))}</td></tr>`;
-      });
-      const {income:ti,expenses:te,savings_investments:tv,loans:tl}=d.totals;
-      h+=`<tr class="tot"><td>Total</td><td class="pp">${fK2(ti)}</td><td class="pn">${fK2(te)}</td><td class="pn">${fK2(tv)}</td><td class="pn">${fK2(tl)}</td><td class="${grand>=0?'pp':'pn'}">${grand>=0?'+':''}${fK2(Math.abs(grand))}</td></tr></tbody></table></div>`;
-      h+=ins('G',`Average monthly surplus: <strong>AED ${fmt(d.surplus_avg)}</strong>. Cross-statement pairs (self-transfers / bank→card payments) are excluded so you don't double-count.`);
-    }else{
-      const n=d.months||1;
-      const {income:ti,expenses:te,savings_investments:tv,loans:tl}=d.totals;
-      const surplus=Math.round((ti-te-tv-tl)/n);
-      h+=`<div class="af">Monthly averages over ${n} month${n!==1?'s':''}</div>`;
-      h+=`<div class="ig">`;
-      h+=ir(mainLbl('income'),`AED ${fmt(Math.round(ti/n))}/mo avg`,'','+AED '+fmt(Math.round(ti/n)),'G','/mo avg');
-      h+=ir(mainLbl('expenses'),`AED ${fmt(Math.round(te/n))}/mo avg`,'','-AED '+fmt(Math.round(te/n)),'R','');
-      h+=ir(mainLbl('savings_investments'),`AED ${fmt(Math.round(tv/n))}/mo avg`,'','-AED '+fmt(Math.round(tv/n)),'B','');
-      h+=ir(mainLbl('loans'),`AED ${fmt(Math.round(tl/n))}/mo avg`,'','-AED '+fmt(Math.round(tl/n)),'B','');
-      h+=`</div>`;
-      h+=`<div style="margin-top:10px">
-        <div class="scr main"><span style="font-weight:600">Monthly surplus</span><span style="font-weight:700;color:${surplus>=0?'var(--G)':'var(--R)'}">${surplus>=0?'+':'−'}AED ${fmt(Math.abs(surplus))}</span></div>
-      </div>`;
-    }
-  }
-  else if(m==='recycle'){
-    const deleted=allTxns.filter(t=>t._deleted).sort((a,b)=>(b.date||'').localeCompare(a.date||''));
-    h+=stats2([{l:'In bin',v:''+deleted.length+' txns',c:''},{l:'Restorable',v:'All',c:'G'},{l:'On refresh',v:'Cleared',c:''}]);
-    if(deleted.length>0){
-      h+=`<div class="recycle-actions"><button class="recycle-action-btn" onclick="restoreAllFromRecycle()">↺ Restore all</button></div>`;
-    }
-    h+=secl('Deleted transactions · tap Restore to bring them back');
-    h+=`<div class="ig" style="padding:0">`;
-    if(!deleted.length){
-      h+=`<div style="padding:24px 14px;text-align:center;font-size:12px;color:var(--t3)">The recycle bin is empty. Deleted transactions will appear here for you to restore during this session.</div>`;
-    }
-    deleted.forEach(t=>{
-      const dateStr=(t.date||'').slice(5).replace('-','/');
-      const catInfo=CATS[t.cat];
-      const catLblShort=catInfo?mainLbl(t.cat):t.cat;
-      const sign=t.direction==='CR'?'+':'−';
-      h+=`<div class="recycle-row">
-        <div style="flex:1;min-width:0">
-          <div style="font-size:13px;color:var(--t)">${t.merchant}</div>
-          <div style="font-size:11px;color:var(--t3);margin-top:2px">${dateStr} · ${catLblShort} · ${sign}AED ${fmt(t.amount)}</div>
-        </div>
-        <button class="recycle-restore" onclick="restoreFromRecycle(${t._id})">↺ Restore</button>
-      </div>`;
-    });
-    h+=`</div>`;
-  }
-  el.innerHTML=h;
+
+  el.innerHTML = h;
+
+  // Bind double-tap rename on every editable section/sub-section label
+  document.querySelectorAll('.section-hdr-lbl[data-mainlbl]').forEach(elx => {
+    const cat = elx.dataset.mainlbl;
+    makeEditable(elx, () => mainLbl(cat), (v) => renameMainBucket(cat, v));
+  });
+  document.querySelectorAll('.subsection-lbl[data-sublbl]').forEach(elx => {
+    const [cat, sub] = elx.dataset.sublbl.split(':');
+    makeEditable(elx, () => subLbl(cat, sub), (v) => renameSubBucket(cat, sub, v));
+  });
+
   refreshBulkBar();
+}
+
+// One main section. Period-filtered txns come in via inPeriod.
+function renderMainSection(cat, inPeriod){
+  const catTxnsAll = inPeriod.filter(t => t.cat === cat);
+  const catTxnsActive = catTxnsAll.filter(t => !t._xPaired);
+
+  // Direction-aware total: income = CR only, others = DR only (refunds subtract)
+  let total = 0;
+  for(const t of catTxnsActive){
+    const amt = Number(t.amount) || 0;
+    if(cat === 'income'){
+      total += t.direction === 'CR' ? amt : -amt;
+    } else {
+      total += t.direction === 'DR' ? amt : -amt;
+    }
+  }
+
+  const totalCls = cat === 'income' ? 'pos' : (total > 0 ? 'neg' : 'neutral');
+  const sign = cat === 'income' ? (total >= 0 ? '+' : '−') : (total > 0 ? '−' : '');
+
+  let h = `<div class="section">
+    <div class="section-hdr">
+      <div>
+        <div class="section-hdr-lbl editable-lbl" data-mainlbl="${cat}">${mainLbl(cat)}</div>
+        <div class="section-hdr-meta">${catTxnsActive.length} transaction${catTxnsActive.length===1?'':'s'}</div>
+      </div>
+      <div class="section-hdr-amt ${totalCls}">${sign}AED ${fmt(Math.abs(total))}</div>
+    </div>
+    <div class="section-body">`;
+
+  // Sub-buckets
+  const subs = getSubKeys(cat);
+  for(const sub of subs){
+    h += renderSubsection(cat, sub, catTxnsAll);
+  }
+
+  // Empty-state fallback if section has no transactions in this period
+  if(catTxnsAll.length === 0){
+    h += `<div class="empty-row" style="padding:14px 0;text-align:center">No transactions in this ${activeMonth==='all' ? 'period' : 'month'}.</div>`;
+  }
+
+  // "+ Add sub" row at the bottom
+  h += `<div class="add-sub-row" onclick="startAddSub('${cat}',this,event)">+ Add new sub under ${mainLbl(cat)}</div>`;
+  h += `</div></div>`;
+  return h;
+}
+
+// One sub-section inside a main section.
+function renderSubsection(cat, sub, catTxnsAll){
+  const subTxnsAll = catTxnsAll.filter(t => t.sub === sub);
+  const subTxnsActive = subTxnsAll.filter(t => !t._xPaired);
+
+  // Skip rendering empty sub-buckets — keeps the statement compact
+  if(subTxnsAll.length === 0) return '';
+
+  // Direction-aware sub-total
+  let subTotal = 0;
+  for(const t of subTxnsActive){
+    const amt = Number(t.amount) || 0;
+    if(cat === 'income'){
+      subTotal += t.direction === 'CR' ? amt : -amt;
+    } else {
+      subTotal += t.direction === 'DR' ? amt : -amt;
+    }
+  }
+  const isCollapsed = collapsedSubs.has(cat + ':' + sub);
+  const collapsedCls = isCollapsed ? 'collapsed' : '';
+
+  let h = `<div class="subsection ${collapsedCls}">
+    <div class="subsection-hdr" onclick="toggleSubsection('${cat}:${sub}')">
+      <div>
+        <span class="subsection-collapse-icon">▼</span>
+        <span class="subsection-lbl editable-lbl" data-sublbl="${cat}:${sub}">${subLbl(cat, sub)}</span>
+        <span class="subsection-meta">${subTxnsActive.length} txn${subTxnsActive.length===1?'':'s'}</span>
+      </div>
+      <div class="subsection-amt ${cat==='income'?'pos':''}">AED ${fmt(Math.abs(subTotal))}</div>
+    </div>
+    <div class="subsection-rows">`;
+
+  // Render transactions, newest first
+  const sorted = [...subTxnsAll].sort((a,b) => (b.date || '').localeCompare(a.date || ''));
+  for(const t of sorted){
+    h += renderTxRow(t, cat);
+  }
+  h += `</div></div>`;
+  return h;
+}
+
+// Returns the "N-S" prefix label for a transaction (file index + seq), or empty
+// string if the data isn't available (e.g. demo data, legacy txns from before
+// the seq feature). Rendered as a small monospace tag at the start of each row.
+function fileSeqLbl(t){
+  if(!t || t._fileIdx == null || t.seq == null) return '';
+  return `${t._fileIdx}-${t.seq}`;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// CAPTURE AUDIT STRIP
+// ═══════════════════════════════════════════════════════════════════════════
+// Brief by default: one line per file showing "194/200 ✓" or similar.
+// Only expands when something needs attention — e.g. lines_detected ≠
+// extracted, or Claude reported skipped_lines (verbatim text the user can
+// match against their PDF). The detailed bucket/Tally-out/recycle breakdown
+// is shown only when a file fails to reconcile, since that's when it's useful.
+function renderAuditStrip(){
+  // Build per-file placement breakdown from allTxns
+  const breakdown = {};
+  for(const t of allTxns){
+    if(t._fileIdx == null) continue;
+    if(!breakdown[t._fileIdx]) breakdown[t._fileIdx] = {bucket:0, tally:0, bin:0};
+    if(t._deleted){ breakdown[t._fileIdx].bin++; }
+    else if(t._xPaired){ breakdown[t._fileIdx].tally++; }
+    else { breakdown[t._fileIdx].bucket++; }
+  }
+
+  // Compute per-file status
+  const fileRows = fileStats.map(fs => {
+    const b = breakdown[fs.fileIdx] || {bucket:0, tally:0, bin:0};
+    const placed = b.bucket + b.tally + b.bin;
+    const expected = fs.lines_detected;
+    const skipped = fs.skipped_lines || [];
+    let status = 'ok';
+    if(expected !== null && placed !== expected) status = 'warn';
+    if(skipped.length) status = 'warn';
+    return { fs, b, placed, expected, skipped, status };
+  });
+
+  const allClean = fileRows.every(r => r.status === 'ok');
+
+  // ── BRIEF MODE: everything reconciles ──
+  if(allClean){
+    let h = `<div class="audit-strip ok">
+      <div class="audit-hdr">
+        <span class="audit-hdr-title">Capture audit</span>
+        <span class="audit-hdr-status">✓ all lines accounted for</span>
+      </div>`;
+    for(const r of fileRows){
+      const total = r.expected !== null ? `${r.placed}/${r.expected}` : `${r.placed}`;
+      h += `<div class="audit-row ok">
+        <div class="audit-row-name" title="${escapeHtml(r.fs.name)}"><span class="seq-tag inline">${r.fs.fileIdx}</span> ${escapeHtml(r.fs.name)}</div>
+        <div class="audit-row-stats">${total} parsed successfully</div>
+      </div>`;
+    }
+    h += `</div>`;
+    return h;
+  }
+
+  // ── DETAILED MODE: at least one file has a gap ──
+  let h = `<div class="audit-strip warn">
+    <div class="audit-hdr">
+      <span class="audit-hdr-title">Capture audit</span>
+      <span class="audit-hdr-status">⚠ some lines need review</span>
+    </div>`;
+  for(const r of fileRows){
+    const total = r.expected !== null ? `${r.placed}/${r.expected}` : `${r.placed}`;
+    const cls = r.status === 'warn' ? 'warn' : 'ok';
+    const gap = (r.expected !== null) ? r.expected - r.placed : 0;
+    let summary;
+    if(r.status === 'ok'){
+      summary = `${total} parsed successfully`;
+    } else if(gap > 0 && r.skipped.length){
+      summary = `${total} parsed · ${r.skipped.length} could not be parsed`;
+    } else if(gap > 0){
+      summary = `${total} parsed · ${gap} unaccounted`;
+    } else if(r.skipped.length){
+      summary = `${total} parsed · ${r.skipped.length} flagged for review`;
+    } else {
+      summary = `${total} parsed`;
+    }
+    h += `<div class="audit-row ${cls}">
+      <div class="audit-row-name" title="${escapeHtml(r.fs.name)}"><span class="seq-tag inline">${r.fs.fileIdx}</span> ${escapeHtml(r.fs.name)}</div>
+      <div class="audit-row-stats">${summary}</div>
+    </div>`;
+    // Show breakdown only for files with bucket+tally+bin movement (helps explain placement)
+    if(r.status === 'warn' && (r.b.tally || r.b.bin)){
+      h += `<div class="audit-detail">
+        ${r.b.bucket} in buckets${r.b.tally?` · ${r.b.tally} in Tally-out`:''}${r.b.bin?` · ${r.b.bin} in recycle`:''}
+      </div>`;
+    }
+    // List the skipped lines verbatim — this is the key new feature
+    if(r.skipped.length){
+      h += `<div class="audit-skipped">
+        <div class="audit-skipped-title">Could not parse — please verify in source PDF:</div>`;
+      for(let k = 0; k < r.skipped.length; k++){
+        h += `<div class="audit-skipped-row"><span class="seq-tag inline">${r.fs.fileIdx}-?</span> ${escapeHtml(r.skipped[k])}</div>`;
+      }
+      h += `</div>`;
+    }
+  }
+  h += `</div>`;
+  return h;
+}
+
+// One transaction row inside a sub-section. Tap merchant → reassign sheet.
+// In bulk mode the whole row toggles selection instead.
+function renderTxRow(t, cat){
+  const isPaired = !!t._xPaired;
+  const pairedBadge = isPaired ? '<span class="xp-badge" title="Paired across statements — see Tally-out below.">⇅ paired</span>' : '';
+  const stfBadge = t.possibly_self_transfer ? '<span class="stf-badge" title="Possible self-transfer.">↔ self?</span>' : '';
+  const dateStr = (t.date || '').slice(5).replace('-','/');
+  const sign = t.direction === 'CR' ? '+' : '−';
+  const amtCls = t.direction === 'CR' ? 'pos' : 'neg';
+  const selected = bulkSelected.has(t._id);
+  const seqLbl = fileSeqLbl(t);
+  const seqBadge = seqLbl ? `<span class="seq-tag" title="File ${t._fileIdx}, line ${t.seq}">${seqLbl}</span>` : '';
+  if(bulkMode){
+    return `<div class="tx-row ${isPaired?'xp-row':''} ${selected?'bulk-sel':''}" id="dr-${t._id}" onclick="bulkToggleRow(${t._id},event)" style="cursor:pointer">
+      <div class="bulk-cb ${selected?'on':''}"></div>
+      <div class="tx-left">
+        <div class="tx-merchant">${seqBadge}${escapeHtml(t.merchant||'Unknown')}${pairedBadge}${stfBadge}</div>
+        <div class="tx-meta">${dateStr}${t.type&&t.type!=='other'?' · '+t.type.replace(/_/g,' '):''}</div>
+      </div>
+      <div class="tx-right">
+        <span class="tx-amt ${amtCls}">${sign}AED ${fmt(t.amount)}</span>
+      </div>
+    </div>`;
+  }
+  return `<div class="tx-row ${isPaired?'xp-row':''}" id="dr-${t._id}">
+    <div class="tx-left" onclick="openSheet(${t._id})">
+      <div class="tx-merchant">${seqBadge}${escapeHtml(t.merchant||'Unknown')}${pairedBadge}${stfBadge}</div>
+      <div class="tx-meta">${dateStr}${t.type&&t.type!=='other'?' · '+t.type.replace(/_/g,' '):''}</div>
+    </div>
+    <div class="tx-right">
+      <span class="tx-amt ${amtCls}">${sign}AED ${fmt(t.amount)}</span>
+      <span class="tx-del" onclick="dashDelete(${t._id})" title="Move to recycle bin">×</span>
+    </div>
+  </div>`;
+}
+
+function escapeHtml(s){
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// P&L summary block. Recomputes from the period-filtered txns so it matches the
+// month-chip selection.
+function renderPLBlock(inPeriod){
+  const real = inPeriod.filter(t => !t._xPaired);
+  const sumDir = (cat, dir) => real
+    .filter(t => t.cat === cat && t.direction === dir)
+    .reduce((a,t) => a + (Number(t.amount)||0), 0);
+
+  // Direction-aware totals (refunds subtract)
+  const inc  = sumDir('income','CR') - sumDir('income','DR');
+  const exp  = sumDir('expenses','DR') - sumDir('expenses','CR');
+  const sav  = sumDir('savings_investments','DR') - sumDir('savings_investments','CR');
+  const loan = sumDir('loans','DR') - sumDir('loans','CR');
+  const net  = inc - exp - sav - loan;
+  const periodLbl = activeMonth === 'all' ? plData.period_label.replace(/^Total · /,'') : prettyMonth(activeMonth);
+
+  return `<div class="pl-block">
+    <div class="pl-block-title">P&amp;L · ${periodLbl}</div>
+    <div class="pl-line"><span>${mainLbl('income')}</span><span class="pl-line-amt">+AED ${fmt(inc)}</span></div>
+    <div class="pl-line"><span>${mainLbl('expenses')}</span><span class="pl-line-amt">−AED ${fmt(exp)}</span></div>
+    <div class="pl-line"><span>${mainLbl('savings_investments')}</span><span class="pl-line-amt">−AED ${fmt(sav)}</span></div>
+    <div class="pl-line"><span>${mainLbl('loans')}</span><span class="pl-line-amt">−AED ${fmt(loan)}</span></div>
+    <div class="pl-line total"><span>Net</span><span class="pl-line-amt ${net>=0?'pos':'neg'}">${net>=0?'+':'−'}AED ${fmt(Math.abs(net))}</span></div>
+  </div>`;
+}
+
+function prettyMonth(ym){
+  const MO = {'01':'Jan','02':'Feb','03':'Mar','04':'Apr','05':'May','06':'Jun','07':'Jul','08':'Aug','09':'Sep','10':'Oct','11':'Nov','12':'Dec'};
+  const [yr, mo] = (ym||'').split('-');
+  return `${MO[mo]||mo} ${yr||''}`;
+}
+
+// Tally-out — lists each cross-statement pair side by side, with both directions
+// shown so the user can verify the netting. Each transaction is still tappable
+// (merchant → reassign, × → delete).
+function renderTallyOut(pairedTxns){
+  // Group by _xPaired ID
+  const byPair = {};
+  for(const t of pairedTxns){
+    if(!byPair[t._xPaired]) byPair[t._xPaired] = [];
+    byPair[t._xPaired].push(t);
+  }
+  const pairs = Object.values(byPair).filter(p => p.length === 2);
+  if(!pairs.length) return '';
+
+  // Sort pairs by most-recent date
+  pairs.sort((a,b) => {
+    const da = Math.max(...a.map(t => t.date||'').sort()) || '';
+    const db = Math.max(...b.map(t => t.date||'').sort()) || '';
+    return db.localeCompare(da);
+  });
+
+  const renderSide = (t) => {
+    const sign = t.direction === 'CR' ? '+' : '−';
+    const amtCls = t.direction === 'CR' ? 'pos' : 'neg';
+    const dateStr = (t.date || '').slice(5).replace('-','/');
+    const seqLbl = fileSeqLbl(t);
+    const seqBadge = seqLbl ? `<span class="seq-tag" title="File ${t._fileIdx}, line ${t.seq}">${seqLbl}</span>` : '';
+    return `<div class="tally-pair-side">
+      <div class="tally-pair-merch" onclick="openSheet(${t._id})" style="cursor:pointer">${seqBadge}${escapeHtml(t.merchant||'Unknown')}</div>
+      <div class="tally-pair-meta">${dateStr} · ${mainLbl(t.cat)}${t.sub?' · '+subLbl(t.cat,t.sub):''}</div>
+      <div class="tally-pair-amt ${amtCls}" style="margin-top:3px">${sign}AED ${fmt(t.amount)}</div>
+    </div>`;
+  };
+
+  let h = `<div class="tally-section">
+    <div class="tally-hdr">
+      <div class="tally-title">⇅ Tally-out · ${pairs.length} pair${pairs.length===1?'':'s'}</div>
+      <div class="tally-meta">excluded from totals</div>
+    </div>
+    <div class="tally-explain">
+      Each pair below is the <strong>same money movement</strong> recorded twice — once on a debit (DR) statement and once on the matching credit (CR). Self-transfers between your own accounts and credit-card bill payments produce these pairs naturally. They're netted out so your P&amp;L shows real cash flow, not double-counted internal moves.
+    </div>`;
+
+  for(const pair of pairs){
+    // Order: DR first, CR second, for visual consistency
+    const dr = pair.find(t => t.direction === 'DR') || pair[0];
+    const cr = pair.find(t => t.direction === 'CR') || pair[1];
+    h += `<div class="tally-pair">
+      ${renderSide(dr)}
+      <div class="tally-pair-arrow">⇅</div>
+      ${renderSide(cr)}
+    </div>`;
+  }
+  h += `</div>`;
+  return h;
+}
+
+// Inline recycle bin section. Replaces the old Recycle tab — only rendered when
+// at least one transaction is in the bin. Each row has a Restore button.
+function renderRecycleSection(deletedTxns){
+  const sorted = [...deletedTxns].sort((a,b) => (b.date||'').localeCompare(a.date||''));
+  let h = `<div class="recycle-section" id="inline-recycle">
+    <div class="recycle-hdr">
+      <div class="recycle-title">↺ Recycle bin · ${deletedTxns.length} item${deletedTxns.length===1?'':'s'}</div>
+      <div class="recycle-meta"><a onclick="restoreAllFromRecycle()" style="color:var(--G);cursor:pointer;font-weight:500">Restore all</a> · clears on refresh</div>
+    </div>`;
+  for(const t of sorted){
+    const sign = t.direction === 'CR' ? '+' : '−';
+    const dateStr = (t.date || '').slice(5).replace('-','/');
+    h += `<div class="recycle-row">
+      <div style="flex:1;min-width:0">
+        <div style="font-size:12.5px;color:var(--t)">${escapeHtml(t.merchant||'Unknown')}</div>
+        <div style="font-size:10.5px;color:var(--t3);margin-top:2px">${dateStr} · ${mainLbl(t.cat)} · ${sign}AED ${fmt(t.amount)}</div>
+      </div>
+      <button class="recycle-restore" onclick="restoreFromRecycle(${t._id})">↺ Restore</button>
+    </div>`;
+  }
+  h += `</div>`;
+  return h;
 }
 
 // ══ HELPERS ══
