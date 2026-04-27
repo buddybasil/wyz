@@ -1,9 +1,12 @@
-// ══ WYZ API — Universal Bank Statement Analyzer + Insights (v5) ══
+// ══ WYZ API — Universal Bank Statement Analyzer + Insights (v6) ══
 // Claude Haiku 4.5. Two actions: "extract" (parse PDF text to txns) + "insight" (generate one sharp observation).
+// v6 change: merchant field is now captured VERBATIM from the source PDF — no
+// stripping of ref numbers, card digits, or tx IDs. This makes it easier for
+// users to verify each row against the original statement.
 // Requires env variable: ANTHROPIC_API_KEY
 
 const MODEL               = 'claude-haiku-4-5-20251001';
-const MAX_TOKENS          = 16000;  // Haiku supports up to 64k; 16k fits ~150+ txns
+const MAX_TOKENS          = 16000;
 const INSIGHT_MAX_TOKENS  = 400;
 const CHUNK_SIZE          = 45000;
 const MAX_TOTAL_CHARS     = 400000;
@@ -14,7 +17,7 @@ const MAX_CONCURRENT      = 3;
 const MAX_RETRIES         = 1;
 const RETRY_DELAY_MS      = 1500;
 
-// ══ TAXONOMY (same as v4) ══
+// ══ TAXONOMY ══
 const TAXONOMY_PROMPT = `
 CATEGORIES (pick one as "cat"):
 - "income"              → money coming in (salary, refunds, cashback, dividends, rental income, transfers IN)
@@ -109,7 +112,7 @@ const EXTRACT_PROMPT = `You are a financial transaction analyzer. You receive ra
 For each transaction return this JSON object:
 {
   "date": "YYYY-MM-DD",
-  "merchant": cleaned description (strip long ref numbers, card digits, tx IDs),
+  "merchant": THE FULL DESCRIPTION EXACTLY AS IT APPEARS IN THE STATEMENT — preserve every word, reference number, card digit, transaction ID, location code, and identifier from the source row. Only collapse runs of whitespace into single spaces and trim leading/trailing whitespace. DO NOT shorten, summarize, paraphrase, normalize, or "clean up" the description. The user is using this field to cross-check rows against the original PDF — exact verbatim wording matters.
   "amount": positive number (no currency symbol, must be > 0),
   "currency": ISO code (AED, USD, INR, GBP, EUR, etc.),
   "direction": "CR" for money IN, "DR" for money OUT,
@@ -121,9 +124,20 @@ For each transaction return this JSON object:
   "possibly_self_transfer": true | false | null  (include only when flagging a DR transfer to the holder's own name; omit otherwise)
 }
 
+IMPORTANT — MERCHANT FIELD: The merchant field must contain the COMPLETE, VERBATIM description from the source line. Examples of correct behavior:
+  Source line: "ATM WDL 4569 EMIRATES NBD ABU DHABI ATM 12345"
+  ✓ correct merchant: "ATM WDL 4569 EMIRATES NBD ABU DHABI ATM 12345"
+  ✗ wrong merchant:   "ATM withdrawal" or "EMIRATES NBD ATM"
+
+  Source line: "POS PURCHASE 1234567890 STARBUCKS DUBAI MALL #4521 AED"
+  ✓ correct merchant: "POS PURCHASE 1234567890 STARBUCKS DUBAI MALL #4521 AED"
+  ✗ wrong merchant:   "Starbucks" or "Starbucks Dubai Mall"
+
+The "type" field handles classification (e.g. type="dining_out" for the Starbucks line) — the merchant string is for verification only, NOT for clean display.
+
 ${TAXONOMY_PROMPT}
 
-GLOBAL MERCHANT GUIDE (use your knowledge for any merchant):
+GLOBAL CLASSIFICATION GUIDE (use your knowledge for any merchant — apply to "type", NOT to the merchant string itself):
 - Starbucks/Costa/Tim Hortons → dining_out
 - Shell/BP/ADNOC/ENOC/EPPCO/EMARAT/Exxon → fuel
 - Netflix/Spotify/Disney+/Prime/Apple.com/iTunes → subscription
@@ -138,17 +152,44 @@ GLOBAL MERCHANT GUIDE (use your knowledge for any merchant):
 
 Return TWO things, one per line:
 
-Line 1: A JSON metadata object: {"lines_detected": N}
-  where N = the total number of transaction-like rows you identified in the statement
-  (i.e. every row that had a date + debit/credit amount, INCLUDING ones you ended up extracting).
-  This helps the user verify coverage.
+Line 1: A JSON metadata object: {"lines_detected": N, "skipped_lines": [...]}
+  where:
+   · lines_detected = the total number of transaction-like rows you identified
+     in the statement (every row that had a date + non-zero debit/credit amount,
+     INCLUDING ones you ended up extracting into the array below).
+   · skipped_lines (OPTIONAL — usually empty) = an array of raw verbatim text
+     strings for any transaction-like line you could NOT extract. If you
+     extracted every line, omit this field or return [].
 
-Line 2: The JSON array of transactions.
+Line 2: The JSON array of extracted transactions.
+
+═══ SKIPPED LINES (rare — usually empty) ═══
+
+You should extract EVERY transaction-like line. The skipped_lines array exists
+only as a fallback for genuine edge cases: text severely garbled by OCR, lines
+truncated at a chunk boundary, dates or amounts you cannot parse with any
+confidence. In all other cases — including ambiguous categorization, unfamiliar
+merchants, suspicious transfers — you should still EXTRACT the line and let the
+user decide. Only put a line in skipped_lines if you literally cannot produce a
+valid {date, amount, direction} triple for it.
+
+When you do skip a line, the value is the raw text exactly as it appears in the
+source. For example:
+  "skipped_lines": [
+    "12/04 ATM WITHDRAWAL 4569 EMIRATES @#&%$ corrupted text",
+    "13/04 PAYMENT THANK YOU truncated mid-amount"
+  ]
+
+The user sees these verbatim so they can spot-check against their PDF.
+
+═══ ORDER (important) ═══
+
+Return transactions in the SAME ORDER they appear in the source statement, top to bottom. Do not reorder by date, amount, or category. The user numbers transactions by their position in your output, then audits "did every line in the PDF land somewhere in the app?" — so output order must match document order. If a chunk spans the middle of a statement, just return that chunk's rows in their natural document order; the backend stitches chunks together.
 
 Example:
 {"lines_detected": 47}
 [
-  {"date": "2026-04-10", "merchant": "...", "amount": 100, ...},
+  {"date": "2026-04-10", "merchant": "POS PURCHASE 1234567 STARBUCKS DXB MALL #4521", "amount": 28, ...},
   ...
 ]
 
@@ -156,7 +197,6 @@ If zero transactions: {"lines_detected": 0}\\n[]
 
 No preamble, no code fences, no commentary outside this format.`;
 
-// ══ INSIGHT PROMPT — tuned for short, specific, behaviorally-useful observations ══
 const INSIGHT_PROMPT = `You are a thoughtful financial coach. Given a user's categorized spending summary, write ONE single observation that will stick with them psychologically before their next spending decision.
 
 RULES — these matter:
@@ -228,23 +268,40 @@ function setCors(res) {
 function parseJsonArray(raw) {
   if (!raw) return {items: [], meta: null};
   const clean = raw.replace(/```json|```/g, '').trim();
-  // Extract the metadata object if present at the start: {"lines_detected": N}
+  // Pull off the metadata object on Line 1. It can now contain nested arrays
+  // (skipped_lines), so we walk braces with depth tracking instead of using
+  // a flat regex. We stop at the first complete top-level {...}.
   let meta = null;
-  const metaMatch = clean.match(/^\{[^{}\[\]]*"lines_detected"[^{}\[\]]*\}/);
-  if (metaMatch) {
-    try { meta = JSON.parse(metaMatch[0]); } catch { meta = null; }
+  {
+    let depth = 0, inStr = false, esc = false, start = -1;
+    for (let i = 0; i < clean.length; i++) {
+      const c = clean[i];
+      if (esc) { esc = false; continue; }
+      if (c === '\\') { esc = true; continue; }
+      if (c === '"') { inStr = !inStr; continue; }
+      if (inStr) continue;
+      if (c === '{') { if (depth === 0) start = i; depth++; }
+      else if (c === '}') {
+        depth--;
+        if (depth === 0 && start !== -1) {
+          try { meta = JSON.parse(clean.slice(start, i + 1)); } catch { meta = null; }
+          break;
+        }
+      } else if (c === '[' && depth === 0) {
+        // Hit the array before any object — no metadata
+        break;
+      }
+    }
   }
   const start = clean.indexOf('[');
   if (start === -1) return {items: [], meta};
-  // Try a clean full-array parse first
   const end = clean.lastIndexOf(']');
   if (end !== -1) {
     try {
       const parsed = JSON.parse(clean.slice(start, end + 1));
       if (Array.isArray(parsed)) return {items: parsed, meta};
-    } catch { /* fall through to object-by-object recovery */ }
+    } catch { /* fall through */ }
   }
-  // Recovery mode: truncated response. Extract complete {...} objects via brace-depth tracking.
   const body = clean.slice(start + 1);
   const objects = [];
   let depth = 0;
@@ -264,7 +321,7 @@ function parseJsonArray(raw) {
       depth--;
       if (depth === 0 && objStart !== -1) {
         const objStr = body.slice(objStart, i + 1);
-        try { objects.push(JSON.parse(objStr)); } catch { /* skip malformed */ }
+        try { objects.push(JSON.parse(objStr)); } catch { /* skip */ }
         objStart = -1;
       }
     }
@@ -288,7 +345,6 @@ const VALID_CATS = new Set(['income', 'expenses', 'savings_investments', 'loans'
 
 function normalizeTxn(t) {
   const direction = (t.direction || '').toUpperCase() === 'CR' ? 'CR' : 'DR';
-  // Migrate legacy "investments" category to new "savings_investments"
   let cat = t.cat;
   if (cat === 'investments') cat = 'savings_investments';
   if (!VALID_CATS.has(cat)) cat = direction === 'CR' ? 'income' : 'expenses';
@@ -297,9 +353,11 @@ function normalizeTxn(t) {
   else if (cat === 'loans')          sub = 'main';
   else if (cat === 'income')         sub = (sub === 'direct' ? 'direct' : 'indirect');
   else if (cat === 'expenses')       sub = VALID_EXP_SUBS.has(sub) ? sub : 'misc';
+  // Merchant: preserve verbatim but cap at 200 chars to avoid runaway data
+  // (was 120; raised because we no longer strip ref numbers)
   return {
     date: t.date || null,
-    merchant: String(t.merchant || 'Unknown').slice(0, 120),
+    merchant: String(t.merchant || 'Unknown').replace(/\s+/g, ' ').trim().slice(0, 200),
     amount: Number(t.amount) || 0,
     currency: t.currency || 'AED',
     direction,
@@ -313,7 +371,6 @@ function normalizeTxn(t) {
 
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
-// ══ CLAUDE CALL (shared, with timeout + retry) ══
 async function callClaude({prompt, userContent, apiKey, maxTokens, timeoutMs, attempt = 1}) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -355,7 +412,6 @@ async function callClaude({prompt, userContent, apiKey, maxTokens, timeoutMs, at
   }
 }
 
-// ══ EXTRACT: run chunks with concurrency cap ══
 async function runChunksConcurrent(chunks, filename, apiKey) {
   const results = new Array(chunks.length);
   const errors = new Array(chunks.length).fill(null);
@@ -374,7 +430,6 @@ async function runChunksConcurrent(chunks, filename, apiKey) {
           timeoutMs: CLAUDE_TIMEOUT_MS,
         });
         const {items: parsed, meta} = parseJsonArray(raw);
-        // Detect likely truncation: long response that doesn't end with a closing ]
         const trimmedEnd = raw.trimEnd().replace(/```$/, '').trimEnd();
         const looksTruncated = raw.length > 12000 && !trimmedEnd.endsWith(']');
         if (looksTruncated) {
@@ -388,10 +443,11 @@ async function runChunksConcurrent(chunks, filename, apiKey) {
           raw_end: raw.slice(-200),
           parsed_count: parsed.length,
           lines_detected: meta?.lines_detected ?? null,
+          skipped_lines: Array.isArray(meta?.skipped_lines) ? meta.skipped_lines : [],
           truncated: looksTruncated,
         };
         const metaStr = meta?.lines_detected != null ? ` [lines_detected=${meta.lines_detected}]` : '';
-        console.log(`Chunk ${myIdx + 1}/${chunks.length}: raw=${raw.length} chars, parsed=${parsed.length} txns${metaStr}${looksTruncated ? ' (TRUNCATED)' : ''}. Start: ${raw.slice(0, 100).replace(/\n/g, ' ')}`);
+        console.log(`Chunk ${myIdx + 1}/${chunks.length}: raw=${raw.length} chars, parsed=${parsed.length} txns${metaStr}${looksTruncated ? ' (TRUNCATED)' : ''}`);
       } catch (err) {
         console.error(`Chunk ${myIdx + 1} failed:`, err.message);
         errors[myIdx] = err.message;
@@ -404,7 +460,6 @@ async function runChunksConcurrent(chunks, filename, apiKey) {
   return {results, errors, rawSamples};
 }
 
-// ══ HANDLER: extract action ══
 async function handleExtract(req, res, apiKey) {
   const {text, filename} = req.body || {};
   if (!text || typeof text !== 'string') {
@@ -451,20 +506,36 @@ async function handleExtract(req, res, apiKey) {
     });
   }
   const all = results.flat().map(normalizeTxn).filter(t => t.date && t.amount >= 0.01);
+  // Per-file dedupe: only collapse rows that match on (date, amount, direction, full merchant string)
+  // Now that merchant is verbatim, exact duplicate rows from the same statement are extremely rare;
+  // this protects against accidental double-extraction within a single chunk only.
   const seen = new Map();
   const unique = [];
   for (const t of all) {
-    const key = `${t.date}|${t.amount}|${t.merchant.slice(0, 20).toLowerCase()}|${t.direction}`;
+    const key = `${t.date}|${t.amount}|${t.merchant}|${t.direction}`;
     const count = seen.get(key) || 0;
     if (count < 3) { seen.set(key, count + 1); unique.push(t); }
   }
-  // Aggregate lines_detected across chunks (if Claude reported it)
+  // Stamp seq numbers (1-indexed) in document order. The frontend will prefix
+  // these with a per-upload file index ("1-12" = file 1, line 12). Together
+  // with lines_detected this lets the user audit capture: every seq from
+  // 1..total_seq must land somewhere — bucket, Tally-out, or recycle bin —
+  // for the file's coverage to read 100%.
+  unique.forEach((t, i) => { t.seq = i + 1; });
   let linesDetected = 0;
   let claudeReported = false;
+  const allSkippedLines = [];
   for (const s of rawSamples) {
     if (s && typeof s.lines_detected === 'number') {
       linesDetected += s.lines_detected;
       claudeReported = true;
+    }
+    if (s && Array.isArray(s.skipped_lines)) {
+      for (const ln of s.skipped_lines) {
+        if (typeof ln === 'string' && ln.trim()) {
+          allSkippedLines.push(ln.trim().slice(0, 300));
+        }
+      }
     }
   }
   const response = {
@@ -472,9 +543,10 @@ async function handleExtract(req, res, apiKey) {
     chunks_total: chunksTotal, chunks_ok: chunksOk, chunks_failed: chunksFailed,
     text_chars: cleaned.length,
     lines_detected: claudeReported ? linesDetected : null,
+    total_seq: unique.length, // highest seq number assigned (= unique.length)
+    skipped_lines: allSkippedLines, // raw text of any lines Claude couldn't extract
   };
   if (chunksFailed > 0) {
-    // Surface the actual underlying error messages so users/devs can diagnose
     const errSamples = errors.filter(e => e).slice(0, 3);
     const errSummary = errSamples.map(e => e.split(':')[0]).join(', ');
     response.warning = `${chunksFailed} of ${chunksTotal} sections failed (${errSummary}). Results may be incomplete — consider splitting this file.`;
@@ -486,7 +558,6 @@ async function handleExtract(req, res, apiKey) {
       `this file was truncated at ${MAX_TOTAL_CHARS} chars (original was ${originalLen}). Split for complete analysis.`;
   }
   if (unique.length === 0 && chunksFailed === 0) {
-    // Chunk succeeded but produced zero parseable transactions — usually a summary/non-statement page
     response.warning = 'No transactions were found in this file. It may be a summary page, cover page, or unsupported statement format.';
     response.diagnostic = {
       cleaned_chars: cleaned.length,
@@ -499,7 +570,6 @@ async function handleExtract(req, res, apiKey) {
   return res.status(200).json(response);
 }
 
-// ══ HANDLER: insight action ══
 async function handleInsight(req, res, apiKey) {
   const {summary} = req.body || {};
   if (!summary || typeof summary !== 'object') {
@@ -508,7 +578,6 @@ async function handleInsight(req, res, apiKey) {
       message: 'No summary data provided.',
     });
   }
-  // Build a compact user-facing summary string for Claude
   const userContent = `Spending summary (${summary.period || 'recent period'}):
 
 Income:                 AED ${summary.totals?.income || 0}
@@ -560,7 +629,6 @@ Now write ONE observation per the rules. Focus on what's genuinely interesting. 
   }
 }
 
-// ══ MAIN HANDLER ══
 export default async function handler(req, res) {
   setCors(res);
   if (req.method === 'OPTIONS') return res.status(200).end();
