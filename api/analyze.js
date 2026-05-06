@@ -11,7 +11,10 @@ const INSIGHT_MAX_TOKENS  = 400;
 const CHUNK_SIZE          = 45000;
 const MAX_TOTAL_CHARS     = 400000;
 const REJECT_ABOVE_CHARS  = 800000;
-const CLAUDE_TIMEOUT_MS   = 45000;
+// Claude per-call timeout. Sits just under Vercel's 60s function ceiling
+// (vercel.json maxDuration=60) to leave a few seconds for response handling.
+// If you upgrade Vercel from Hobby to Pro you can raise both.
+const CLAUDE_TIMEOUT_MS   = 55000;
 const INSIGHT_TIMEOUT_MS  = 20000;
 const MAX_CONCURRENT      = 3;
 const MAX_RETRIES         = 1;
