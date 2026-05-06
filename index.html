@@ -877,80 +877,147 @@ async function startAnalysis(){
     linesDetected=null;
     for(let i=0;i<files.length;i++){
       setAct(i); idx=i;
+      const fname = files[i].name;
       document.getElementById('ph').textContent=`Reading ${i+1} of ${files.length}...`;
-      if(i>0) await wait(1000);
-      const mime=files[i].type||getMime(files[i].name);
-      let text='';
+      if(i>0) await wait(500);
+      const mime=files[i].type||getMime(fname);
+
+      // ── Extract raw text from the file ──
+      let rawText='';
       try{
         if(mime==='application/pdf'){
-          text=await extractPdfText(files[i]);
+          rawText=await extractPdfText(files[i]);
         } else {
           const b64=await toB64(files[i]);
-          text=atob(b64).slice(0,40000);
+          rawText=atob(b64);
         }
       }catch(e){
-        skipped.push({name:files[i].name,reason:'error'});
+        skipped.push({name:fname,reason:'error',detail:e.message});
         document.getElementById('pd'+i)?.setAttribute('class','pdot wait');
-        document.getElementById('pt'+i).innerHTML=`⚠ Could not read: ${files[i].name.slice(0,25)}`;
+        document.getElementById('pt'+i).innerHTML=`⚠ Could not read: ${fname.slice(0,25)}`;
         document.getElementById('pt'+i)?.setAttribute('class','ptxt wait');
         continue;
       }
-      let success=false;
-      for(let attempt=0;attempt<2;attempt++){
-        try{
-          const res=await fetch(WORKER_URL,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'extract',text,filename:files[i].name})});
-          if(res.status===429||res.status===529){await wait(8000);continue;}
-          if(res.status===413){
-            const d=await res.json();
-            skipped.push({name:files[i].name,reason:'toolarge',detail:d.message});
-            document.getElementById('pd'+i)?.setAttribute('class','pdot wait');
-            document.getElementById('pt'+i).innerHTML=`⚠ Too large — please split: ${files[i].name.slice(0,25)}`;
-            document.getElementById('pt'+i)?.setAttribute('class','ptxt wait');
-            break;
-          }
-          if(!res.ok){
-            const errData=await res.json().catch(()=>({message:`HTTP ${res.status}`}));
-            throw new Error(errData.message||errData.error||`Worker error ${res.status}`);
-          }
-          const d=await res.json();
-          if(d.error) throw new Error(d.message||d.error);
-          const fileTxns = d.transactions||[];
-          const fileTxnCount = fileTxns.length;
-          // Allocate a stable file index for THIS upload (1, 2, 3, ...). Every
-          // txn from this file gets stamped with _fileIdx, paired with its seq
-          // from the backend, gives the "N-S" prefix shown on each row.
-          const fileIdx = nextFileIdx++;
-          for(const t of fileTxns){ t._fileIdx = fileIdx; }
-          all.push(...fileTxns);
-          if(typeof d.lines_detected==='number'){
-            linesDetected=(linesDetected||0)+d.lines_detected;
-          }
-          // Per-file capture record. extracted = highest seq number we got back
-          // (= total_seq, falls back to length). lines_detected is Claude's self-
-          // reported count of transaction-like rows in the source. skipped_lines
-          // is the raw verbatim text of any rows Claude could not extract.
-          fileStats.push({
-            fileIdx,
-            name: files[i].name,
-            extracted: typeof d.total_seq === 'number' ? d.total_seq : fileTxnCount,
-            lines_detected: (typeof d.lines_detected==='number') ? d.lines_detected : null,
-            skipped_lines: Array.isArray(d.skipped_lines) ? d.skipped_lines : [],
-          });
-          if(d.warning){
-            const detailStr=d.error_details?d.error_details.join(' | '):d.warning;
-            skipped.push({name:files[i].name,reason:'partial',detail:detailStr,count:d.count||0});
-          }
-          success=true; break;
-        }catch(e){
-          if(attempt===0){await wait(5000);continue;}
-          const isTimeout=e.message.includes('524')||e.message.includes('timeout')||e.message.toLowerCase().includes('network');
-          skipped.push({name:files[i].name,reason:isTimeout?'timeout':'error',detail:e.message});
-          document.getElementById('pd'+i)?.setAttribute('class','pdot wait');
-          document.getElementById('pt'+i).innerHTML=`⚠ ${isTimeout?'Too large — needs splitting':'Failed'}: ${files[i].name.slice(0,25)}`;
-          document.getElementById('pt'+i)?.setAttribute('class','ptxt wait');
-        }
+
+      // ── Browser-side clean + chunk ──
+      // This is the architectural fix: instead of one 60s Vercel call doing
+      // everything, we split into smaller chunks here and make N parallel
+      // calls, each with its own 60s budget.
+      const cleaned = cleanPdfText(rawText);
+      if(cleaned.length < 50){
+        skipped.push({name:fname,reason:'empty',detail:'no readable text after cleanup'});
+        document.getElementById('pd'+i)?.setAttribute('class','pdot wait');
+        document.getElementById('pt'+i).innerHTML=`⚠ Empty: ${fname.slice(0,25)}`;
+        document.getElementById('pt'+i)?.setAttribute('class','ptxt wait');
+        continue;
       }
-      if(success) setDone(i);
+      const chunks = chunkForUpload(cleaned, 25000);
+      console.log(`File ${i+1} (${fname}): ${rawText.length} raw → ${cleaned.length} cleaned → ${chunks.length} chunk(s)`);
+      if(chunks.length > 1){
+        document.getElementById('pt'+i).innerHTML=`Reading ${fname.slice(0,22)} (${chunks.length} parts)`;
+      }
+
+      // ── Process chunks with limited concurrency ──
+      // 3 in flight at once balances speed against API rate limits and the
+      // risk of overloading the user's network.
+      const fileIdx = nextFileIdx++;
+      const chunkResults = new Array(chunks.length);
+      const chunkErrors = new Array(chunks.length).fill(null);
+      let chunksDone = 0;
+      const updateChunkProgress = () => {
+        if(chunks.length > 1){
+          document.getElementById('pt'+i).innerHTML =
+            `Reading ${fname.slice(0,22)} (${chunksDone}/${chunks.length} parts)`;
+        }
+      };
+      let chunkIdx = 0;
+      const worker = async () => {
+        while(chunkIdx < chunks.length){
+          const myIdx = chunkIdx++;
+          const chunkLabel = chunks.length > 1 ? `${fname} (part ${myIdx+1}/${chunks.length})` : fname;
+          // Each chunk gets up to 2 attempts
+          let attempted = false;
+          for(let attempt=0; attempt<2; attempt++){
+            try{
+              attempted = true;
+              const d = await fetchChunk(chunks[myIdx], chunkLabel);
+              chunkResults[myIdx] = d;
+              break;
+            }catch(e){
+              if(e.code === 'toolarge'){
+                chunkErrors[myIdx] = {reason:'toolarge', detail:e.message};
+                break;
+              }
+              if(attempt === 0 && (e.status === 429 || e.status === 529)){
+                await wait(5000); continue;
+              }
+              if(attempt === 0){ await wait(2000); continue; }
+              const isTimeout = (e.message||'').includes('524') ||
+                                (e.message||'').toLowerCase().includes('timeout') ||
+                                (e.message||'').toLowerCase().includes('took too long');
+              chunkErrors[myIdx] = {reason: isTimeout ? 'timeout' : 'error', detail: e.message};
+            }
+          }
+          chunksDone++;
+          updateChunkProgress();
+        }
+      };
+      const concurrency = Math.min(3, chunks.length);
+      await Promise.all(Array.from({length: concurrency}, () => worker()));
+
+      // ── Merge chunk results for this file ──
+      const successfulChunks = chunkResults.filter(r => r);
+      const failedChunks = chunkErrors.filter(e => e);
+      if(successfulChunks.length === 0){
+        // All chunks failed for this file
+        const firstErr = failedChunks[0] || {reason:'error', detail:'unknown'};
+        skipped.push({name:fname, reason:firstErr.reason, detail:firstErr.detail});
+        document.getElementById('pd'+i)?.setAttribute('class','pdot wait');
+        document.getElementById('pt'+i).innerHTML =
+          `⚠ ${firstErr.reason==='timeout'?'Timed out':firstErr.reason==='toolarge'?'Too large':'Failed'}: ${fname.slice(0,22)}`;
+        document.getElementById('pt'+i)?.setAttribute('class','ptxt wait');
+        continue;
+      }
+
+      // Concatenate transactions across chunks (in chunk order = document order)
+      const fileTxns = [];
+      let fileLinesDetected = 0;
+      let fileLinesDetectedReported = false;
+      const fileSkippedLines = [];
+      for(const r of chunkResults){
+        if(!r) continue;
+        if(Array.isArray(r.transactions)) fileTxns.push(...r.transactions);
+        if(typeof r.lines_detected === 'number'){
+          fileLinesDetected += r.lines_detected;
+          fileLinesDetectedReported = true;
+        }
+        if(Array.isArray(r.skipped_lines)) fileSkippedLines.push(...r.skipped_lines);
+      }
+      // Renumber seq globally for this file (each chunk had its own 1..N)
+      fileTxns.forEach((t, k) => { t.seq = k + 1; t._fileIdx = fileIdx; });
+      all.push(...fileTxns);
+      if(fileLinesDetectedReported){
+        linesDetected = (linesDetected || 0) + fileLinesDetected;
+      }
+
+      // Record per-file stats — drives the audit strip
+      fileStats.push({
+        fileIdx,
+        name: fname,
+        extracted: fileTxns.length,
+        lines_detected: fileLinesDetectedReported ? fileLinesDetected : null,
+        skipped_lines: fileSkippedLines,
+        chunks_total: chunks.length,
+        chunks_failed: failedChunks.length,
+      });
+
+      // Surface partial-failure warnings (some chunks worked, some didn't)
+      if(failedChunks.length > 0){
+        const detail = `${failedChunks.length} of ${chunks.length} parts failed: ${failedChunks.map(e=>e.detail||e.reason).slice(0,2).join(' | ')}`;
+        skipped.push({name:fname, reason:'partial', detail, count:fileTxns.length});
+      }
+
+      setDone(i);
     }
     if(skipped.length){
       const timeouts=skipped.filter(s=>s.reason==='timeout'||s.reason==='toolarge');
@@ -2134,7 +2201,127 @@ async function extractPdfText(file){
     const pageText=content.items.map(i=>i.str||'').join(' ');
     text+=pageText+'\n';
   }
-  return text.trim().slice(0,25000);
+  // No cap. Big files get split into multiple smaller API calls below.
+  return text.trim();
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// BROWSER-SIDE TEXT CLEANUP
+// ═══════════════════════════════════════════════════════════════════════════
+// Strips noise that wastes tokens on Claude's end without losing transactions:
+//   · Arabic / RTL / CJK script ranges (bilingual statements like Mashreq)
+//   · URLs and email addresses
+//   · Page numbers ("Page 3 of 15")
+//   · "Balance brought forward" / "Balance carried forward" continuation rows
+//   · Lines that repeat 3+ times in the document (per-page header/footer
+//     boilerplate — customer info, compliance text, account summary box)
+// Net effect: a 50k-char Mashreq statement compresses to ~25-30k of actual
+// transaction content, which fits cleanly in one chunk.
+function cleanPdfText(raw){
+  if(!raw) return '';
+  let cleaned = raw;
+  // Strip non-Latin scripts (Arabic, Hebrew, Devanagari, CJK, Thai, etc.) —
+  // these are bilingual UI text from the statement, never transaction data.
+  cleaned = cleaned.replace(
+    /[\u0590-\u05FF\u0600-\u06FF\u0700-\u074F\u0750-\u077F\u0780-\u07BF\u0900-\u097F\u3000-\u303F\u3040-\u309F\u30A0-\u30FF\u3400-\u4DBF\u4E00-\u9FFF\uAC00-\uD7AF\u0E00-\u0E7F\u08A0-\u08FF\uFB50-\uFDFF\uFE70-\uFEFF]/g,
+    ''
+  );
+  cleaned = cleaned.replace(/https?:\/\/\S+/g, '');
+  cleaned = cleaned.replace(/[\w.-]+@[\w.-]+\.\w+/g, '');
+  cleaned = cleaned.replace(/Page \d+ of \d+/gi, '');
+  cleaned = cleaned.replace(/Balance (brought|carried) forward[^\n]*/gi, '');
+  // Detect and strip lines that repeat 3+ times (per-page boilerplate).
+  // Only consider lines of meaningful length (avoid stripping common short data).
+  const counts = {};
+  for(const ln of cleaned.split('\n')){
+    const t = ln.trim();
+    if(t.length >= 20 && t.length <= 250){
+      counts[t] = (counts[t] || 0) + 1;
+    }
+  }
+  const repeated = new Set();
+  for(const [ln, n] of Object.entries(counts)){
+    if(n >= 3) repeated.add(ln);
+  }
+  if(repeated.size > 0){
+    cleaned = cleaned.split('\n').filter(ln => !repeated.has(ln.trim())).join('\n');
+  }
+  // Collapse whitespace
+  cleaned = cleaned.replace(/[ \t]+/g, ' ').replace(/\n{3,}/g, '\n\n').trim();
+  return cleaned;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// BROWSER-SIDE CHUNKING (the key architectural fix for large PDFs)
+// ═══════════════════════════════════════════════════════════════════════════
+// Splits cleaned text into chunks small enough that each fits a single 60-second
+// Vercel function call. Splits at lines starting with a date (DD/MM/YYYY or
+// DD-MM-YYYY) to avoid breaking multi-line transactions across chunks.
+// Default ~25k chars: comfortably handles ~80-100 transactions per chunk and
+// leaves room for the prompt overhead.
+function chunkForUpload(cleanedText, maxSize = 25000){
+  if(!cleanedText || cleanedText.length <= maxSize) return [cleanedText || ''];
+  const chunks = [];
+  const lines = cleanedText.split('\n');
+  // A "transaction-start" line — robust across formats: DD/MM/YYYY, DD-MM-YYYY,
+  // YYYY-MM-DD, "MM/DD/YY".
+  const isDateLine = (ln) => /^\s*\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4}\b/.test(ln) ||
+                              /^\s*\d{4}[\/\-]\d{1,2}[\/\-]\d{1,2}\b/.test(ln);
+  let current = '';
+  for(const ln of lines){
+    const tentative = current ? current + '\n' + ln : ln;
+    // Only split if (a) the chunk is over size, (b) we're at least half full,
+    // AND (c) the new line starts a transaction (so we don't break mid-txn).
+    if(tentative.length > maxSize && current.length > maxSize * 0.5 && isDateLine(ln)){
+      chunks.push(current);
+      current = ln;
+    } else {
+      current = tentative;
+    }
+  }
+  if(current) chunks.push(current);
+  // Safety net: if any chunk is still oversize (no date boundaries found),
+  // split it hard at line boundaries.
+  const final = [];
+  for(const c of chunks){
+    if(c.length <= maxSize * 1.5){ final.push(c); continue; }
+    // Hard split at lines
+    const ls = c.split('\n');
+    let buf = '';
+    for(const ln of ls){
+      const t = buf ? buf + '\n' + ln : ln;
+      if(t.length > maxSize && buf){ final.push(buf); buf = ln; }
+      else buf = t;
+    }
+    if(buf) final.push(buf);
+  }
+  return final;
+}
+
+// Single-chunk POST to the backend. Returns the parsed response or throws.
+// Each call has its own 60s Vercel function budget — the whole point of
+// browser-side chunking.
+async function fetchChunk(text, filename){
+  const res = await fetch(WORKER_URL, {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({action: 'extract', text, filename}),
+  });
+  if(res.status === 413){
+    const d = await res.json();
+    const e = new Error(d.message || 'file too large');
+    e.code = 'toolarge';
+    throw e;
+  }
+  if(!res.ok){
+    const errData = await res.json().catch(() => ({message: `HTTP ${res.status}`}));
+    const e = new Error(errData.message || errData.error || `Worker error ${res.status}`);
+    e.status = res.status;
+    throw e;
+  }
+  const d = await res.json();
+  if(d.error) throw new Error(d.message || d.error);
+  return d;
 }
 function toB64(f){return new Promise((res,rej)=>{const r=new FileReader();r.onload=e=>res(e.target.result.split(',')[1]);r.onerror=()=>rej(new Error('Read failed'));r.readAsDataURL(f);});}
 function getMime(n){const e=n.split('.').pop().toLowerCase();return e==='pdf'?'application/pdf':e==='csv'?'text/csv':'image/jpeg';}
