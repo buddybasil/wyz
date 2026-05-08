@@ -1,266 +1,18 @@
-// ══ WYZ API — Universal Bank Statement Analyzer + Insights (v6) ══
-// Claude Haiku 4.5. Two actions: "extract" (parse PDF text to txns) + "insight" (generate one sharp observation).
-// v6 change: merchant field is now captured VERBATIM from the source PDF — no
-// stripping of ref numbers, card digits, or tx IDs. This makes it easier for
-// users to verify each row against the original statement.
-// Requires env variable: ANTHROPIC_API_KEY
+// WYZ API - Hybrid Bank Statement Analyzer (v7)
+// Goal: fast, reliable extraction without Vercel/Claude timeouts.
+// Strategy:
+//   1) Use deterministic parsers for common statement layouts.
+//   2) Use local merchant/category rules for immediate dashboard output.
+//   3) Use Claude only for optional insight text and last-resort extraction.
+// Requires env variable: ANTHROPIC_API_KEY only for action="insight" and fallback_ai_extract.
 
-const MODEL               = 'claude-haiku-4-5-20251001';
-const MAX_TOKENS          = 16000;
-const INSIGHT_MAX_TOKENS  = 400;
-const CHUNK_SIZE          = 45000;
-const MAX_TOTAL_CHARS     = 400000;
-const REJECT_ABOVE_CHARS  = 800000;
-// Claude per-call timeout. Sits just under Vercel's 60s function ceiling
-// (vercel.json maxDuration=60) to leave a few seconds for response handling.
-// If you upgrade Vercel from Hobby to Pro you can raise both.
-const CLAUDE_TIMEOUT_MS   = 55000;
-const INSIGHT_TIMEOUT_MS  = 20000;
-const MAX_CONCURRENT      = 3;
-const MAX_RETRIES         = 1;
-const RETRY_DELAY_MS      = 1500;
-
-// ══ TAXONOMY ══
-const TAXONOMY_PROMPT = `
-CATEGORIES (pick one as "cat"):
-- "income"              → money coming in (salary, refunds, cashback, dividends, rental income, transfers IN)
-- "expenses"            → real consumption (food, fuel, rent, utilities, insurance, healthcare, etc.)
-- "savings_investments" → money set aside for later (savings deposits, emergency fund, life insurance, stocks, retirement, crypto, gold)
-- "loans"               → credit card bill payments (both directions) and loan/EMI/mortgage payments
-
-SUB-CATEGORIES:
-- If cat="income":              "direct" (salary/wages) OR "indirect" (everything else)
-- If cat="expenses":            "food" | "shelter" | "transport" | "fees" | "misc"
-- If cat="savings_investments": "liquid" (cash-accessible: savings deposits, emergency fund, money market)
-                                OR "committed" (locked-in growth: life insurance, stocks, retirement, crypto, gold)
-- If cat="loans":               always "main"
-
-TYPE:
-- Food:      supermarket, food_delivery, dining_out, convenience_store
-- Shelter:   rent, utilities, internet_phone, maintenance
-- Transport: fuel, toll, parking, ride_hail, car_rental, public_transport, gov_services, vehicle_service
-- Fees:      bank_fee, late_fee, overlimit_fee, forex_fee, annual_fee, school_tuition
-- Misc:      subscription, online_shopping, healthcare, entertainment, travel,
-             personal_care, clothing, electronics, cash_withdrawal, insurance,
-             transfer_out, other
-- Income:    salary, bonus, cashback, dividend, refund, rental_income,
-             insurance_reimbursement, savings_profit, interest, transfer_in, other_income
-- Savings/Investments: savings_deposit, emergency_fund, equity, gold, life_insurance, mutual_fund, crypto, bond, retirement
-- Loan:      card_payment, card_payment_received, loan_installment, mortgage_payment
-
-FREQUENCY: "monthly" | "weekly" | "quarterly" | "annual" | "adhoc"
-
-CRITICAL CLASSIFICATION RULES:
-
-1. **Insurance** — distinguish carefully:
-   - LIFE insurance with cash/surrender value (Zurich Life, Aviva, MetLife, LIC, HDFC Life, Sukoon Life) → cat="savings_investments", sub="committed", type="life_insurance"
-   - MOTOR insurance (NEXT CAR, car insurance, auto insurance) → cat="expenses", sub="misc", type="insurance"
-   - HEALTH insurance → cat="expenses", sub="misc", type="insurance"
-   - TRAVEL/HOME/OTHER insurance → cat="expenses", sub="misc", type="insurance"
-   - Unspecified "LIVA", "ALLIANCE INSURANCE", "POLICY BAZAAR" → default expenses/misc/insurance UNLESS clearly life
-   - Insurance REFUNDS → cat="income", type="insurance_reimbursement"
-
-2. **Credit card bill payments** — BOTH directions go to "loans":
-   - Bank: "CREDIT CARD PAYMNT", "CC PAYMENT" (debit) → cat="loans", type="card_payment", direction="DR"
-   - Card: "PAYMENT RECEIVED", "PAYMENT - THANK YOU" (credit) → cat="loans", type="card_payment_received", direction="CR"
-
-3. **Loan/EMI** — "INSTALLMENT RECOVERY", "EMI", "MORTGAGE" → cat="loans", type="loan_installment"
-
-4. **Transfers between accounts** — capture but classify conservatively:
-   - DR (money out to another party/account): default cat="expenses", sub="misc", type="transfer_out"
-   - CR (money in from another party): cat="income", sub="indirect", type="transfer_in"
-   - **Self-transfer flag**: if you can identify the account holder's own name from the statement
-     header (e.g. "MR BASIL ABRAHAM" at the top), and a DR transfer goes to that SAME name,
-     add a "possibly_self_transfer": true field (as an extra JSON field). Do NOT auto-move it — let the
-     user decide whether it's actually a savings transfer or a payment to someone else with
-     the same name. The flag is a hint, not a verdict.
-
-5. **Gov fees/fines** (POLICE, SMARTDXB, TASJEEL, RTA, DMV) → cat="expenses", sub="transport", type="gov_services"
-
-6. **Telecom/utility** (DU, ETISALAT, VIRGIN, E&, Verizon, AT&T) → cat="expenses", sub="shelter", type="internet_phone"
-
-7. **Salary** always cat="income", sub="direct", type="salary", freq="monthly"
-
-8. **Explicit savings deposits** — labeled "SAVINGS", "FIXED DEPOSIT", "FD", "TERM DEPOSIT" → cat="savings_investments", sub="liquid", type="savings_deposit"
-`.trim();
-
-const EXTRACT_PROMPT = `You are a financial transaction analyzer. You receive raw text from a bank or credit-card statement (any country, any bank, any currency) and return clean structured transactions.
-
-═══ THE CORE RULE (this is all that matters) ═══
-
-**A line is a transaction if — and only if — it has:**
-  (a) a DATE, AND
-  (b) a DEBIT or CREDIT AMOUNT greater than zero (not 0.00, not blank).
-
-**Capture every such line.** If in doubt, capture it — the user can delete it later. Do NOT filter for "real" vs "fee" vs "reversal" — any line with a date + non-zero amount is in scope.
-
-**Skip only these (they are NEVER transactions):**
-- Opening balance / Closing balance rows
-- Sub-totals, page totals, "Total debits", "Total credits"
-- Column headers (e.g. repeating "Posting Date / Description / Amount" rows)
-- T&Cs, disclaimers, footnotes, marketing text
-- Rows where BOTH debit and credit columns are 0.00 or blank
-
-**Important — capture these too (they ARE transactions by the core rule):**
-- Bank fees (FOREIGN TRANSACTION FEE, LATE PAYMENT FEE, OVERLIMIT FEE, ANNUAL FEE) → expenses/fees
-- Interest charges and interest earned
-- Government fees, traffic fines, RTA, SMARTDXB, TASJEEL → expenses/transport/gov_services
-- Insurance premiums of any kind
-- Credit card payments (both directions — bank→card debit AND card side credit) → loans
-- Inter-account transfers between the user's own accounts → transfer_in / transfer_out
-- Small amounts — any amount > 0 is captured
-
-═══ OUTPUT ═══
-
-For each transaction return this JSON object:
-{
-  "date": "YYYY-MM-DD",
-  "merchant": THE FULL DESCRIPTION EXACTLY AS IT APPEARS IN THE STATEMENT — preserve every word, reference number, card digit, transaction ID, location code, and identifier from the source row. Only collapse runs of whitespace into single spaces and trim leading/trailing whitespace. DO NOT shorten, summarize, paraphrase, normalize, or "clean up" the description. The user is using this field to cross-check rows against the original PDF — exact verbatim wording matters.
-  "amount": positive number (no currency symbol, must be > 0),
-  "currency": ISO code (AED, USD, INR, GBP, EUR, etc.),
-  "direction": "CR" for money IN, "DR" for money OUT,
-  "cat": category from taxonomy below,
-  "sub": sub-category,
-  "type": specific type,
-  "freq": frequency,
-  "note": short context (<=40 chars) or null,
-  "possibly_self_transfer": true | false | null  (include only when flagging a DR transfer to the holder's own name; omit otherwise)
-}
-
-IMPORTANT — MERCHANT FIELD: The merchant field must contain the COMPLETE, VERBATIM description from the source line. Examples of correct behavior:
-  Source line: "ATM WDL 4569 EMIRATES NBD ABU DHABI ATM 12345"
-  ✓ correct merchant: "ATM WDL 4569 EMIRATES NBD ABU DHABI ATM 12345"
-  ✗ wrong merchant:   "ATM withdrawal" or "EMIRATES NBD ATM"
-
-  Source line: "POS PURCHASE 1234567890 STARBUCKS DUBAI MALL #4521 AED"
-  ✓ correct merchant: "POS PURCHASE 1234567890 STARBUCKS DUBAI MALL #4521 AED"
-  ✗ wrong merchant:   "Starbucks" or "Starbucks Dubai Mall"
-
-The "type" field handles classification (e.g. type="dining_out" for the Starbucks line) — the merchant string is for verification only, NOT for clean display.
-
-${TAXONOMY_PROMPT}
-
-GLOBAL CLASSIFICATION GUIDE (use your knowledge for any merchant — apply to "type", NOT to the merchant string itself):
-- Starbucks/Costa/Tim Hortons → dining_out
-- Shell/BP/ADNOC/ENOC/EPPCO/EMARAT/Exxon → fuel
-- Netflix/Spotify/Disney+/Prime/Apple.com/iTunes → subscription
-- Amazon/Noon/Flipkart → online_shopping
-- Uber/Lyft/Ola/Careem → ride_hail
-- Talabat/Deliveroo/DoorDash/Swiggy/Zomato → food_delivery
-- Lulu/Carrefour/Spinneys/Waitrose/Tesco → supermarket
-- SELFDRIVE/GLOMO → car_rental
-- TAMARA/TABBY (BNPL) → online_shopping
-
-═══ OUTPUT FORMAT ═══
-
-Return TWO things, one per line:
-
-Line 1: A JSON metadata object: {"lines_detected": N, "skipped_lines": [...]}
-  where:
-   · lines_detected = the total number of transaction-like rows you identified
-     in the statement (every row that had a date + non-zero debit/credit amount,
-     INCLUDING ones you ended up extracting into the array below).
-   · skipped_lines (OPTIONAL — usually empty) = an array of raw verbatim text
-     strings for any transaction-like line you could NOT extract. If you
-     extracted every line, omit this field or return [].
-
-Line 2: The JSON array of extracted transactions.
-
-═══ SKIPPED LINES (rare — usually empty) ═══
-
-You should extract EVERY transaction-like line. The skipped_lines array exists
-only as a fallback for genuine edge cases: text severely garbled by OCR, lines
-truncated at a chunk boundary, dates or amounts you cannot parse with any
-confidence. In all other cases — including ambiguous categorization, unfamiliar
-merchants, suspicious transfers — you should still EXTRACT the line and let the
-user decide. Only put a line in skipped_lines if you literally cannot produce a
-valid {date, amount, direction} triple for it.
-
-When you do skip a line, the value is the raw text exactly as it appears in the
-source. For example:
-  "skipped_lines": [
-    "12/04 ATM WITHDRAWAL 4569 EMIRATES @#&%$ corrupted text",
-    "13/04 PAYMENT THANK YOU truncated mid-amount"
-  ]
-
-The user sees these verbatim so they can spot-check against their PDF.
-
-═══ ORDER (important) ═══
-
-Return transactions in the SAME ORDER they appear in the source statement, top to bottom. Do not reorder by date, amount, or category. The user numbers transactions by their position in your output, then audits "did every line in the PDF land somewhere in the app?" — so output order must match document order. If a chunk spans the middle of a statement, just return that chunk's rows in their natural document order; the backend stitches chunks together.
-
-Example:
-{"lines_detected": 47}
-[
-  {"date": "2026-04-10", "merchant": "POS PURCHASE 1234567 STARBUCKS DXB MALL #4521", "amount": 28, ...},
-  ...
-]
-
-If zero transactions: {"lines_detected": 0}\\n[]
-
-No preamble, no code fences, no commentary outside this format.`;
-
-const INSIGHT_PROMPT = `You are a thoughtful financial coach. Given a user's categorized spending summary, write ONE single observation that will stick with them psychologically before their next spending decision.
-
-RULES — these matter:
-1. Be SPECIFIC: name amounts and merchants, not categories. "AED 847 on Talabat" not "you spend a lot on food."
-2. Be COMPARATIVE: compare to the past self or to income, never to strangers or national averages.
-3. Be ACTIONABLE: hint at the next decision they'll face, don't lecture.
-4. Be KIND: no shame, no "you should," no moralizing. Treat the user as an intelligent adult.
-5. Be BRIEF: 2-3 sentences max, plain language, no financial jargon.
-6. Find what's actually INTERESTING, not what's obvious. Don't say "your biggest category is food." Say something they didn't notice.
-7. If there is nothing surprising, say something encouraging and honest ("Your spending looks steady month-over-month — biggest line is rent at X.") — do NOT invent drama.
-
-OUTPUT FORMAT — return ONLY a JSON object, no preamble:
-{
-  "headline": "The one sentence that matters, max ~120 chars",
-  "detail": "Optional 1-sentence expansion with the specific number/math, max ~180 chars",
-  "tone": "neutral" | "warning" | "encouraging"
-}
-
-The headline is the critical piece — it's what the user will remember.`;
-
-// ══ TEXT CLEANING ══
-function cleanStatementText(text) {
-  if (!text) return '';
-  let cleaned = text;
-  cleaned = cleaned.replace(
-    /[\u0590-\u05FF\u0600-\u06FF\u0700-\u074F\u0750-\u077F\u0780-\u07BF\u0900-\u097F\u3000-\u303F\u3040-\u309F\u30A0-\u30FF\u3400-\u4DBF\u4E00-\u9FFF\uAC00-\uD7AF\u0E00-\u0E7F\u08A0-\u08FF\uFB50-\uFDFF\uFE70-\uFEFF]/g,
-    ''
-  );
-  const endMarkers = [
-    /\*{3,}\s*END\s*OF\s*STATEMENT\s*\*{3,}/i,
-    /End\s*of\s*Transaction\s*Details/i,
-  ];
-  for (const m of endMarkers) {
-    const pos = cleaned.search(m);
-    if (pos > 0) { cleaned = cleaned.slice(0, pos); break; }
-  }
-  cleaned = cleaned.replace(/General Terms and Important Information[\s\S]*$/i, '');
-  cleaned = cleaned.replace(/Terms\s+(and|&)\s+Conditions[\s\S]{200,}$/i, '');
-  cleaned = cleaned.replace(/Important (Information|Notice|Disclaimer)[\s\S]{200,}$/i, '');
-  cleaned = cleaned.replace(/Disclaimer[\s\S]{200,}$/i, '');
-  cleaned = cleaned.replace(/https?:\/\/\S+/g, '');
-  cleaned = cleaned.replace(/[\w.-]+@[\w.-]+\.\w+/g, '');
-  cleaned = cleaned.replace(/[ \t]+/g, ' ').replace(/\n{3,}/g, '\n\n').trim();
-  return cleaned;
-}
-
-function chunkText(text, size = CHUNK_SIZE) {
-  if (text.length <= size) return [text];
-  const chunks = [];
-  const lines = text.split('\n');
-  let current = '';
-  for (const line of lines) {
-    if ((current + '\n' + line).length > size && current.length > 0) {
-      chunks.push(current); current = line;
-    } else {
-      current = current ? current + '\n' + line : line;
-    }
-  }
-  if (current) chunks.push(current);
-  return chunks;
-}
+const MODEL = 'claude-haiku-4-5-20251001';
+const INSIGHT_MAX_TOKENS = 450;
+const INSIGHT_TIMEOUT_MS = 18000;
+const FALLBACK_TIMEOUT_MS = 35000;
+const FALLBACK_MAX_TOKENS = 7000;
+const MAX_TOTAL_CHARS = 700000;
+const REJECT_ABOVE_CHARS = 1400000;
 
 function setCors(res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -268,113 +20,341 @@ function setCors(res) {
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 }
 
-function parseJsonArray(raw) {
-  if (!raw) return {items: [], meta: null};
-  const clean = raw.replace(/```json|```/g, '').trim();
-  // Pull off the metadata object on Line 1. It can now contain nested arrays
-  // (skipped_lines), so we walk braces with depth tracking instead of using
-  // a flat regex. We stop at the first complete top-level {...}.
-  let meta = null;
-  {
-    let depth = 0, inStr = false, esc = false, start = -1;
-    for (let i = 0; i < clean.length; i++) {
-      const c = clean[i];
-      if (esc) { esc = false; continue; }
-      if (c === '\\') { esc = true; continue; }
-      if (c === '"') { inStr = !inStr; continue; }
-      if (inStr) continue;
-      if (c === '{') { if (depth === 0) start = i; depth++; }
-      else if (c === '}') {
-        depth--;
-        if (depth === 0 && start !== -1) {
-          try { meta = JSON.parse(clean.slice(start, i + 1)); } catch { meta = null; }
-          break;
-        }
-      } else if (c === '[' && depth === 0) {
-        // Hit the array before any object — no metadata
-        break;
-      }
-    }
-  }
-  const start = clean.indexOf('[');
-  if (start === -1) return {items: [], meta};
-  const end = clean.lastIndexOf(']');
-  if (end !== -1) {
-    try {
-      const parsed = JSON.parse(clean.slice(start, end + 1));
-      if (Array.isArray(parsed)) return {items: parsed, meta};
-    } catch { /* fall through */ }
-  }
-  const body = clean.slice(start + 1);
-  const objects = [];
-  let depth = 0;
-  let objStart = -1;
-  let inString = false;
-  let escape = false;
-  for (let i = 0; i < body.length; i++) {
-    const c = body[i];
-    if (escape) { escape = false; continue; }
-    if (c === '\\') { escape = true; continue; }
-    if (c === '"') { inString = !inString; continue; }
-    if (inString) continue;
-    if (c === '{') {
-      if (depth === 0) objStart = i;
-      depth++;
-    } else if (c === '}') {
-      depth--;
-      if (depth === 0 && objStart !== -1) {
-        const objStr = body.slice(objStart, i + 1);
-        try { objects.push(JSON.parse(objStr)); } catch { /* skip */ }
-        objStart = -1;
-      }
-    }
-  }
-  return {items: objects, meta};
+function normalizeSpaces(s) {
+  return String(s || '')
+    .replace(/[\u200B-\u200D\uFEFF]/g, '')
+    .replace(/\uFFFE/g, '')
+    .replace(/[ \t]+/g, ' ')
+    .replace(/\s+([,.:;])/g, '$1')
+    .trim();
 }
 
-function parseJsonObject(raw) {
-  if (!raw) return null;
-  const clean = raw.replace(/```json|```/g, '').trim();
-  const start = clean.indexOf('{');
-  const end = clean.lastIndexOf('}');
-  if (start === -1 || end === -1) return null;
-  try { return JSON.parse(clean.slice(start, end + 1)); }
-  catch { return null; }
+function cleanStatementText(text) {
+  if (!text) return '';
+  let t = String(text).replace(/\r/g, '\n');
+  t = t.replace(/[\u0590-\u05FF\u0600-\u06FF\u0700-\u074F\u0750-\u077F\u0780-\u07BF\u0900-\u097F\u3000-\u303F\u3040-\u309F\u30A0-\u30FF\u3400-\u4DBF\u4E00-\u9FFF\uAC00-\uD7AF\u0E00-\u0E7F\u08A0-\u08FF\uFB50-\uFDFF\uFE70-\uFEFF]/g, ' ');
+  t = t.replace(/General Terms and Important Information[\s\S]*$/i, '');
+  t = t.replace(/Terms\s+(and|&)\s+Conditions[\s\S]{200,}$/i, '');
+  t = t.replace(/Important (Information|Notice|Disclaimer)[\s\S]{200,}$/i, '');
+  t = t.replace(/\*{3,}\s*END\s*OF\s*STATEMENT\s*\*{3,}/gi, '\nEND_OF_STATEMENT\n');
+  t = t.replace(/https?:\/\/\S+/g, ' ');
+  t = t.replace(/[\w.-]+@[\w.-]+\.\w+/g, ' ');
+  t = t.replace(/[ \t]+/g, ' ').replace(/\n{3,}/g, '\n\n').trim();
+  return t;
 }
 
-const VALID_EXP_SUBS = new Set(['food', 'shelter', 'transport', 'fees', 'misc']);
-const VALID_SAV_SUBS = new Set(['liquid', 'committed']);
-const VALID_CATS = new Set(['income', 'expenses', 'savings_investments', 'loans']);
+function parseAmount(v) {
+  if (v == null) return 0;
+  const s = String(v).replace(/,/g, '').replace(/[^[\]0-9.\-]/g, '');
+  const n = Number(s.replace(/[\[\]]/g, ''));
+  return Number.isFinite(n) ? Math.abs(n) : 0;
+}
 
-function normalizeTxn(t) {
-  const direction = (t.direction || '').toUpperCase() === 'CR' ? 'CR' : 'DR';
-  let cat = t.cat;
-  if (cat === 'investments') cat = 'savings_investments';
-  if (!VALID_CATS.has(cat)) cat = direction === 'CR' ? 'income' : 'expenses';
-  let sub = t.sub;
-  if (cat === 'savings_investments') sub = VALID_SAV_SUBS.has(sub) ? sub : 'committed';
-  else if (cat === 'loans')          sub = 'main';
-  else if (cat === 'income')         sub = (sub === 'direct' ? 'direct' : 'indirect');
-  else if (cat === 'expenses')       sub = VALID_EXP_SUBS.has(sub) ? sub : 'misc';
-  // Merchant: preserve verbatim but cap at 200 chars to avoid runaway data
-  // (was 120; raised because we no longer strip ref numbers)
+function isoFromDMY(s) {
+  const m = String(s || '').match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);
+  if (!m) return null;
+  return `${m[3]}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}`;
+}
+
+function makeTxn({date, merchant, amount, currency = 'AED', direction, source = 'parser', parser = null, raw = null}) {
+  const t = {
+    date,
+    merchant: normalizeSpaces(merchant).slice(0, 240) || 'Unknown',
+    amount: Number(amount) || 0,
+    currency,
+    direction: direction === 'CR' ? 'CR' : 'DR',
+    cat: direction === 'CR' ? 'income' : 'expenses',
+    sub: direction === 'CR' ? 'indirect' : 'misc',
+    type: direction === 'CR' ? 'other_income' : 'other',
+    freq: 'adhoc',
+    note: null,
+    source,
+    parser,
+  };
+  if (raw) t.raw = normalizeSpaces(raw).slice(0, 320);
+  return categorizeTxn(t);
+}
+
+function isNoiseLine(line) {
+  const l = line.toLowerCase();
+  return !line ||
+    l.includes('transaction date description') ||
+    l.includes('transaction date') && l.includes('amount') ||
+    l.includes('primary card number') ||
+    l.includes('card holder name') ||
+    l.includes('credit card statement') ||
+    l.includes('statement of account') ||
+    l.includes('statement period') ||
+    l.includes('current balance') ||
+    l.includes('minimum amount due') ||
+    l.includes('total amount due') ||
+    l.includes('credit limit') ||
+    l.includes('available credit') ||
+    l.includes('commercial bank of dubai') ||
+    l.includes('licensed by the central bank') ||
+    l.includes('end_of_statement') ||
+    /^\*{3,}/.test(line);
+}
+
+// ADCB 365 Cashback card table:
+// 11/04/2026 LULU HYPERMARKET LLC BRAN ABU DHABI DR 113.5
+function parseAdcbCreditCard(text) {
+  const rows = [];
+  const lines = text.split(/\n+/).map(normalizeSpaces).filter(Boolean);
+  const re = /^(\d{2}\/\d{2}\/\d{4})\s+(.+?)\s+(CR|DR)\s+([\d,]+(?:\.\d+)?)$/i;
+  for (const line of lines) {
+    if (isNoiseLine(line)) continue;
+    const m = line.match(re);
+    if (!m) continue;
+    const date = isoFromDMY(m[1]);
+    const amount = parseAmount(m[4]);
+    if (!date || amount <= 0) continue;
+    rows.push(makeTxn({date, merchant: m[2], amount, direction: m[3].toUpperCase(), parser: 'adcb_card', raw: line}));
+  }
+  return rows;
+}
+
+// CBD credit-card table:
+// 25-03-2026 25-03-2026 CLAUDE.AI SUBSCRIPTION ANTHROPIC.COM CA [ 21.00] 80.97
+// 27-03-2026 27-03-2026 PAYMENTRECEIVED - FTS & SWIFT 2,376.00 CR
+function parseCbdCreditCard(text) {
+  const rows = [];
+  const lines = text.split(/\n+/).map(normalizeSpaces).filter(Boolean);
+  const re = /^(\d{2}-\d{2}-\d{4})\s+(\d{2}-\d{2}-\d{4})\s+(.+?)\s+([\d,]+(?:\.\d+)?)\s*(CR)?$/i;
+  for (const line of lines) {
+    if (isNoiseLine(line)) continue;
+    if (/^\d{6}\*+\d+\s*-/.test(line)) continue;
+    const m = line.match(re);
+    if (!m) continue;
+    let merchant = m[3];
+    // Keep foreign currency marker in merchant, e.g. [ 63.00].
+    const date = isoFromDMY(m[1]);
+    const amount = parseAmount(m[4]);
+    if (!date || amount <= 0) continue;
+    const direction = m[5] || /payment\s*received|refund|reversal/i.test(merchant) ? 'CR' : 'DR';
+    rows.push(makeTxn({date, merchant, amount, direction, parser: 'cbd_card', raw: line}));
+  }
+  return rows;
+}
+
+// ADCB account table. Works with layout-preserved rows and with many PDF.js multiline records.
+// Columns: Posting Date, Value Date, Description, Ref/Cheque No, Debit Amount, Credit Amount, Balance.
+function parseAdcbAccount(text) {
+  const rows = [];
+  const dateTime = /\d{2}\/\d{2}\/\d{4}(?:\s+\d{2}:\d{2}(?::\d{2})?)?/g;
+  const compact = text
+    .split(/\n+/)
+    .map(normalizeSpaces)
+    .filter(Boolean)
+    .filter(line => !isNoiseLine(line))
+    .join('\n');
+
+  const starts = [];
+  let m;
+  const startRe = /(?:^|\n)(\d{2}\/\d{2}\/\d{4})(?:\s+\d{2}:\d{2}(?::\d{2})?)?/g;
+  while ((m = startRe.exec(compact)) !== null) starts.push(m.index + (compact[m.index] === '\n' ? 1 : 0));
+
+  for (let i = 0; i < starts.length; i++) {
+    const rec = compact.slice(starts[i], starts[i + 1] || compact.length).replace(/\n/g, ' ');
+    const dates = [...rec.matchAll(/\d{2}\/\d{2}\/\d{4}/g)].map(x => ({value: x[0], index: x.index}));
+    if (dates.length < 2) continue;
+    const postingDate = dates[0].value;
+    const valueDate = dates[1].value;
+
+    // Tail must contain debit credit balance. Balances sometimes show .68, allow leading dot.
+    const tail = rec.match(/(.+?)\s+([\d,]+(?:\.\d+)?|\.\d+)\s+([\d,]+(?:\.\d+)?|\.\d+)\s+([\d,]+(?:\.\d+)?|\.\d+)\s*$/);
+    if (!tail) continue;
+    const debit = parseAmount(tail[2]);
+    const credit = parseAmount(tail[3]);
+    if (debit <= 0 && credit <= 0) continue;
+
+    let body = tail[1];
+    const valueDatePos = body.indexOf(valueDate);
+    if (valueDatePos >= 0) body = body.slice(valueDatePos + valueDate.length).trim();
+
+    // Remove obvious trailing reference token, but keep transfer/merchant details.
+    body = body.replace(/\s+(PHUB\d+|\d{8,}|[A-Z0-9]{4,})\s*$/i, '').trim();
+    body = body.replace(/^\d{6,}\s+/, '').trim();
+
+    const date = isoFromDMY(postingDate);
+    const direction = credit > 0 ? 'CR' : 'DR';
+    const amount = credit > 0 ? credit : debit;
+    if (!date || amount <= 0 || body.length < 2) continue;
+    rows.push(makeTxn({date, merchant: body, amount, direction, parser: 'adcb_account', raw: rec}));
+  }
+  return rows;
+}
+
+// Payslip support: useful because users often upload payslips with account statements.
+function parsePayslip(text) {
+  if (!/employee\s+payslip/i.test(text) || !/net\s+pay/i.test(text)) return [];
+  const period = text.match(/Payroll Interval\s+(\d{1,2}\s+[A-Za-z]{3,9}\s+\d{4})\s+-\s+(\d{1,2}\s+[A-Za-z]{3,9}\s+\d{4})/i);
+  const net = text.match(/Net\s+Pay\s+([\d,]+(?:\.\d+)?)/i);
+  if (!net) return [];
+  let date = null;
+  if (period) {
+    const d = new Date(period[2]);
+    if (!Number.isNaN(d.getTime())) date = d.toISOString().slice(0, 10);
+  }
+  if (!date) date = new Date().toISOString().slice(0, 10);
+  return [makeTxn({date, merchant: 'Employee Payslip Net Pay', amount: parseAmount(net[1]), direction: 'CR', parser: 'payslip', raw: 'Net Pay'})];
+}
+
+function dedupePreserveOrder(items) {
+  const seen = new Map();
+  const out = [];
+  for (const t of items) {
+    const key = `${t.date}|${t.direction}|${t.amount.toFixed(2)}|${t.merchant.toUpperCase()}`;
+    const count = seen.get(key) || 0;
+    // Do not over-dedupe genuine duplicate same-day purchases. Keep up to 4 identical rows.
+    if (count < 4) {
+      seen.set(key, count + 1);
+      out.push(t);
+    }
+  }
+  out.forEach((t, i) => { t.seq = i + 1; });
+  return out;
+}
+
+function scoreParse(rows, text) {
+  if (!rows.length) return 0;
+  const dateCount = (text.match(/\b\d{2}[\/\-]\d{2}[\/\-]\d{4}\b/g) || []).length;
+  return rows.length / Math.max(1, Math.min(dateCount, rows.length + 20));
+}
+
+function deterministicExtract(text) {
+  const cleaned = cleanStatementText(text);
+  const candidates = [
+    {name: 'adcb_card', rows: parseAdcbCreditCard(cleaned)},
+    {name: 'cbd_card', rows: parseCbdCreditCard(cleaned)},
+    {name: 'adcb_account', rows: parseAdcbAccount(cleaned)},
+    {name: 'payslip', rows: parsePayslip(cleaned)},
+  ];
+  candidates.sort((a, b) => {
+    const bs = scoreParse(b.rows, cleaned), as = scoreParse(a.rows, cleaned);
+    if (bs !== as) return bs - as;
+    return b.rows.length - a.rows.length;
+  });
+  const best = candidates[0];
+  if (best && best.rows.length > 0) return {parser: best.name, rows: dedupePreserveOrder(best.rows), cleaned};
+  return {parser: null, rows: [], cleaned};
+}
+
+function categorizeTxn(t) {
+  const m = String(t.merchant || '').toUpperCase();
+  const out = {...t};
+
+  if (out.direction === 'CR') {
+    if (/PAYMENT\s*RECEIVED|CARD\s*PAYMENT\s*RECEIVED|PRINCIPAL CR/.test(m)) {
+      out.cat = 'loans'; out.sub = 'main'; out.type = 'card_payment_received'; return out;
+    }
+    if (/CASHBACK/.test(m)) {
+      out.cat = 'income'; out.sub = 'indirect'; out.type = 'cashback'; return out;
+    }
+    if (/SALARY|PAYSLIP|NET PAY/.test(m)) {
+      out.cat = 'income'; out.sub = 'direct'; out.type = 'salary'; out.freq = 'monthly'; return out;
+    }
+    if (/DIVIDEND|PROFIT PAID|INTEREST/.test(m)) {
+      out.cat = 'income'; out.sub = 'indirect'; out.type = 'dividend'; return out;
+    }
+    if (/REFUND|REVERSAL|LANDMARK|AMAZON\.AE/.test(m)) {
+      out.cat = 'income'; out.sub = 'indirect'; out.type = 'refund'; return out;
+    }
+    out.cat = 'income'; out.sub = 'indirect'; out.type = 'transfer_in'; return out;
+  }
+
+  if (/CREDIT CARD PAYMNT|CREDIT CARD PAYMENT|CARD PAYMENT|PAYMENT TO CARD|PRINCIPAL DB/.test(m)) {
+    out.cat = 'loans'; out.sub = 'main'; out.type = 'card_payment'; return out;
+  }
+  if (/INSTALLMENT RECOVERY|EMI|LOAN|MORTGAGE/.test(m)) {
+    out.cat = 'loans'; out.sub = 'main'; out.type = 'loan_installment'; return out;
+  }
+  if (/ZURICH INTL|ZURICH|LIFE LTD|LIC |HDFC LIFE|METLIFE|AVIVA/.test(m)) {
+    out.cat = 'savings_investments'; out.sub = 'committed'; out.type = 'life_insurance'; return out;
+  }
+  if (/POLICY BAZAAR|LIVA|ALLIANCE INSURANCE|NEXTCAR|CAR INSURANCE|INSURANCE/.test(m)) {
+    out.cat = 'expenses'; out.sub = 'misc'; out.type = 'insurance'; return out;
+  }
+  if (/ADNOC|ENOC|EPPCO|SHELL|FUEL|PETROL|SITE\s+\d+/.test(m)) {
+    out.cat = 'expenses'; out.sub = 'transport'; out.type = 'fuel'; return out;
+  }
+  if (/SALIK|TASJEEL|RTA|SMARTDXB|DUBAI SMARTGOVERNMENT|ABU DHABI POLICE|POLICE|PARKING|NOQODI|DIFC PARKING/.test(m)) {
+    out.cat = 'expenses'; out.sub = 'transport'; out.type = 'gov_services'; return out;
+  }
+  if (/LULU|CARREFOUR|CRREFOUR|WAITROSE|SPINNEYS|SUPERMARKET|HYPERMARKET|GROCERY|MINIMART|MINI MARKET|AD COOP|BAQALA|MARKET/.test(m)) {
+    out.cat = 'expenses'; out.sub = 'food'; out.type = 'supermarket'; return out;
+  }
+  if (/TALABAT|DELIVEROO|NOON FOOD|KEETA|FOOD DELIVERY/.test(m)) {
+    out.cat = 'expenses'; out.sub = 'food'; out.type = 'food_delivery'; return out;
+  }
+  if (/RESTAURANT|RESTAU|CAFE|CAFETERIA|KFC|BURGER|MCDONALD|SUBWAY|KRISPY|DINING|KARAK|SHAWARMA|BAKERY|CHOCOLATE|CHURROS|MALABAR|VASANTA|ARAB FOOD/.test(m)) {
+    out.cat = 'expenses'; out.sub = 'food'; out.type = 'dining_out'; return out;
+  }
+  if (/DU |DU\s|E&|ETISALAT|VIRGIN MOBILE|APPLE PAY800188|APPLE PAYDUBAI|DIGITAL APP|POSTPAID|ONE-TIME PAY/.test(m)) {
+    out.cat = 'expenses'; out.sub = 'shelter'; out.type = 'internet_phone'; return out;
+  }
+  if (/GEMS|SCHOOL|TUITION|UNITED INDIAN/.test(m)) {
+    out.cat = 'expenses'; out.sub = 'fees'; out.type = 'school_tuition'; return out;
+  }
+  if (/APPLE\.COM|ITUNES|OPENAI|CHATGPT|CLAUDE\.AI|ANTHROPIC|LUMALABS|OPENART|NETFLIX|SPOTIFY|SUBSCRIPTION|NOON ONE/.test(m)) {
+    out.cat = 'expenses'; out.sub = 'misc'; out.type = 'subscription'; return out;
+  }
+  if (/FOREIGN TRANSACTION FEE|VAT ON FOREIGN|ANNUAL FEE|OVERLIMIT FEE|VATON OVERLIMIT|VAT ON ANNUAL/.test(m)) {
+    out.cat = 'expenses'; out.sub = 'fees'; out.type = m.includes('OVERLIMIT') ? 'overlimit_fee' : (m.includes('ANNUAL') ? 'annual_fee' : 'forex_fee'); return out;
+  }
+  if (/PHARMACY|MEDICAL|HOSPITAL|CLINIC|BURJEEL|ASTER|MEDICLINIC|NMC|TAHA/.test(m)) {
+    out.cat = 'expenses'; out.sub = 'misc'; out.type = 'healthcare'; return out;
+  }
+  if (/AMAZON|NOON|TABBY|TAMARA|TRENDYOL|IKEA|HOME CENTRE|HOME BOX|LANDMARK|MINISO|FIRSTCRY|CHARLES AND KEITH|MARKS&SPENCER/.test(m)) {
+    out.cat = 'expenses'; out.sub = 'misc'; out.type = 'online_shopping'; return out;
+  }
+  if (/AIRBNB|HOTEL|HYATT|PULLMAN|ETIHAD AIR|AIRWAYS|AIRPORTS|APOLLO FLIGHT|TRAVEL|TICKET|PLATINUMLIST/.test(m)) {
+    out.cat = 'expenses'; out.sub = 'misc'; out.type = 'travel'; return out;
+  }
+  if (/CAREEM|TAXI|SELFDRIVE|GLOMO|CAR RENTAL|MOBILITY/.test(m)) {
+    out.cat = 'expenses'; out.sub = 'transport'; out.type = /TAXI|CAREEM/.test(m) ? 'ride_hail' : 'car_rental'; return out;
+  }
+  if (/ATM WDL|CASH WITHDRAWAL/.test(m)) {
+    out.cat = 'expenses'; out.sub = 'misc'; out.type = 'cash_withdrawal'; return out;
+  }
+  if (/TRF OUT|SEND MONEY|MBTRF|AANI|TRANSFER/.test(m)) {
+    out.cat = 'expenses'; out.sub = 'misc'; out.type = 'transfer_out';
+    if (/BASIL ABRAHAM/.test(m)) out.possibly_self_transfer = true;
+    return out;
+  }
+  out.cat = 'expenses'; out.sub = 'misc'; out.type = 'other';
+  return out;
+}
+
+function summarizeTransactions(txns) {
+  const totals = {income: 0, expenses: 0, savings_investments: 0, loans: 0};
+  const by_sub = {};
+  const merchants = new Map();
+  for (const t of txns) {
+    const cat = totals[t.cat] == null ? 'expenses' : t.cat;
+    totals[cat] += t.amount;
+    const subKey = `${cat}/${t.sub || 'main'}`;
+    by_sub[subKey] = (by_sub[subKey] || 0) + t.amount;
+    if (t.direction === 'DR' && cat !== 'savings_investments' && cat !== 'loans') {
+      const key = t.merchant;
+      const prev = merchants.get(key) || {merchant: key, total: 0, count: 0, category: t.type};
+      prev.total += t.amount; prev.count += 1;
+      merchants.set(key, prev);
+    }
+  }
+  const round = n => Math.round(n * 100) / 100;
+  for (const k of Object.keys(totals)) totals[k] = round(totals[k]);
+  for (const k of Object.keys(by_sub)) by_sub[k] = round(by_sub[k]);
   return {
-    date: t.date || null,
-    merchant: String(t.merchant || 'Unknown').replace(/\s+/g, ' ').trim().slice(0, 200),
-    amount: Number(t.amount) || 0,
-    currency: t.currency || 'AED',
-    direction,
-    cat, sub,
-    type: t.type || 'other',
-    freq: t.freq || 'adhoc',
-    note: t.note || null,
-    possibly_self_transfer: Boolean(t.possibly_self_transfer),
+    totals,
+    by_sub,
+    top_merchants: [...merchants.values()].sort((a,b) => b.total - a.total).slice(0, 20).map(x => ({...x, total: round(x.total)})),
+    months: new Set(txns.map(t => String(t.date).slice(0, 7))).size || 1,
   };
 }
 
-const sleep = (ms) => new Promise(r => setTimeout(r, ms));
-
-async function callClaude({prompt, userContent, apiKey, maxTokens, timeoutMs, attempt = 1}) {
+async function callClaude({prompt, userContent, apiKey, maxTokens, timeoutMs}) {
+  if (!apiKey) throw new Error('config_missing: ANTHROPIC_API_KEY is not configured');
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
@@ -386,25 +366,12 @@ async function callClaude({prompt, userContent, apiKey, maxTokens, timeoutMs, at
         'anthropic-version': '2023-06-01',
       },
       signal: controller.signal,
-      body: JSON.stringify({
-        model: MODEL,
-        max_tokens: maxTokens,
-        messages: [{role: 'user', content: `${prompt}\n\n${userContent}`}],
-      }),
+      body: JSON.stringify({model: MODEL, max_tokens: maxTokens, messages: [{role: 'user', content: `${prompt}\n\n${userContent}`}]}),
     });
     clearTimeout(timer);
-    if ((res.status === 429 || res.status === 529) && attempt <= MAX_RETRIES) {
-      await sleep(RETRY_DELAY_MS * attempt);
-      return callClaude({prompt, userContent, apiKey, maxTokens, timeoutMs, attempt: attempt + 1});
-    }
     if (!res.ok) {
-      const errText = await res.text();
-      const code = res.status;
-      if (code === 401) throw new Error('auth_failed: API key invalid');
-      if (code === 429) throw new Error('rate_limit: too many requests');
-      if (code === 529) throw new Error('overloaded: Anthropic servers busy');
-      if (code >= 500) throw new Error(`server_error: ${code}`);
-      throw new Error(`claude_error: ${code} — ${errText.slice(0, 120)}`);
+      const body = await res.text();
+      throw new Error(`claude_error:${res.status}:${body.slice(0, 160)}`);
     }
     const data = await res.json();
     return data?.content?.[0]?.text || '';
@@ -415,249 +382,125 @@ async function callClaude({prompt, userContent, apiKey, maxTokens, timeoutMs, at
   }
 }
 
-async function runChunksConcurrent(chunks, filename, apiKey) {
-  const results = new Array(chunks.length);
-  const errors = new Array(chunks.length).fill(null);
-  const rawSamples = new Array(chunks.length).fill(null);
-  let idx = 0;
-  async function worker() {
-    while (idx < chunks.length) {
-      const myIdx = idx++;
-      const label = chunks.length > 1 ? `part ${myIdx + 1}/${chunks.length}` : '';
-      try {
-        const raw = await callClaude({
-          prompt: EXTRACT_PROMPT,
-          userContent: `File: ${filename || 'statement.pdf'}${label ? ` (${label})` : ''}\n\nStatement text:\n${chunks[myIdx]}`,
-          apiKey,
-          maxTokens: MAX_TOKENS,
-          timeoutMs: CLAUDE_TIMEOUT_MS,
-        });
-        const {items: parsed, meta} = parseJsonArray(raw);
-        const trimmedEnd = raw.trimEnd().replace(/```$/, '').trimEnd();
-        const looksTruncated = raw.length > 12000 && !trimmedEnd.endsWith(']');
-        if (looksTruncated) {
-          errors[myIdx] = `truncated: response was ${raw.length} chars, cut off mid-output. Recovered ${parsed.length} complete transactions — consider splitting this file for full coverage.`;
-          console.warn(`Chunk ${myIdx + 1} likely truncated; recovered ${parsed.length} txns`);
-        }
-        results[myIdx] = parsed;
-        rawSamples[myIdx] = {
-          raw_length: raw.length,
-          raw_start: raw.slice(0, 200),
-          raw_end: raw.slice(-200),
-          parsed_count: parsed.length,
-          lines_detected: meta?.lines_detected ?? null,
-          skipped_lines: Array.isArray(meta?.skipped_lines) ? meta.skipped_lines : [],
-          truncated: looksTruncated,
-        };
-        const metaStr = meta?.lines_detected != null ? ` [lines_detected=${meta.lines_detected}]` : '';
-        console.log(`Chunk ${myIdx + 1}/${chunks.length}: raw=${raw.length} chars, parsed=${parsed.length} txns${metaStr}${looksTruncated ? ' (TRUNCATED)' : ''}`);
-      } catch (err) {
-        console.error(`Chunk ${myIdx + 1} failed:`, err.message);
-        errors[myIdx] = err.message;
-        results[myIdx] = [];
-      }
-    }
-  }
-  const workerCount = Math.min(MAX_CONCURRENT, chunks.length);
-  await Promise.all(Array.from({length: workerCount}, () => worker()));
-  return {results, errors, rawSamples};
+function parseJsonObject(raw) {
+  if (!raw) return null;
+  const clean = raw.replace(/```json|```/g, '').trim();
+  const s = clean.indexOf('{'), e = clean.lastIndexOf('}');
+  if (s < 0 || e < s) return null;
+  try { return JSON.parse(clean.slice(s, e + 1)); } catch { return null; }
+}
+
+function parseJsonArray(raw) {
+  if (!raw) return [];
+  const clean = raw.replace(/```json|```/g, '').trim();
+  const s = clean.indexOf('['), e = clean.lastIndexOf(']');
+  if (s < 0 || e < s) return [];
+  try { const arr = JSON.parse(clean.slice(s, e + 1)); return Array.isArray(arr) ? arr : []; } catch { return []; }
+}
+
+const FALLBACK_PROMPT = `Extract only clear financial transaction rows from the statement text. Return a JSON array only. Each object must be {"date":"YYYY-MM-DD","merchant":"verbatim description","amount":number,"currency":"AED","direction":"DR"|"CR"}. Do not include opening balance, closing balance, headers, terms, explanations, or code fences. If unsure, skip the row.`;
+
+async function fallbackAiExtract(cleaned, filename, apiKey) {
+  // Keep fallback small to avoid timeout. Use only likely transaction lines/records.
+  const likely = cleaned
+    .split(/\n+/)
+    .map(normalizeSpaces)
+    .filter(l => /\b\d{2}[\/\-]\d{2}[\/\-]\d{4}\b/.test(l))
+    .slice(0, 180)
+    .join('\n');
+  if (likely.length < 50) return [];
+  const raw = await callClaude({prompt: FALLBACK_PROMPT, userContent: `File: ${filename || 'statement'}\n\n${likely}`, apiKey, maxTokens: FALLBACK_MAX_TOKENS, timeoutMs: FALLBACK_TIMEOUT_MS});
+  return parseJsonArray(raw).map(t => makeTxn({
+    date: t.date,
+    merchant: t.merchant,
+    amount: t.amount,
+    currency: t.currency || 'AED',
+    direction: t.direction,
+    parser: 'ai_fallback',
+    source: 'claude',
+  })).filter(t => t.date && t.amount > 0);
 }
 
 async function handleExtract(req, res, apiKey) {
-  const {text, filename} = req.body || {};
+  const {text, filename, allow_ai_fallback = false} = req.body || {};
   if (!text || typeof text !== 'string') {
-    return res.status(400).json({
-      error: 'missing_text',
-      message: 'No statement text provided. The PDF may be image-only or password-protected.',
-    });
+    return res.status(400).json({error: 'missing_text', message: 'No readable text was provided. The PDF may be image-only, password-protected, or unsupported.'});
   }
   if (text.length > REJECT_ABOVE_CHARS) {
-    return res.status(413).json({
-      error: 'file_too_large',
-      message: `This statement is very large (${Math.round(text.length / 1000)}k characters). Please split the PDF into smaller files and re-upload.`,
-      size_chars: text.length,
-      limit_chars: REJECT_ABOVE_CHARS,
-      suggestion: 'split_and_retry',
-    });
+    return res.status(413).json({error: 'file_too_large', message: `Readable text is very large (${Math.round(text.length / 1000)}k chars). Split and retry.`, size_chars: text.length, limit_chars: REJECT_ABOVE_CHARS});
   }
-  let cleaned = cleanStatementText(text);
-  if (cleaned.length < 50) {
-    return res.status(200).json({
-      transactions: [], count: 0, filename,
-      warning: 'This file contained very little readable text. It may be image-only, password-protected, or not a statement.',
-    });
-  }
-  const originalLen = cleaned.length;
-  let truncated = false;
-  if (cleaned.length > MAX_TOTAL_CHARS) {
-    cleaned = cleaned.slice(0, MAX_TOTAL_CHARS);
-    truncated = true;
-  }
-  const chunks = chunkText(cleaned);
-  console.log(`Extract request: filename=${filename}, text_len=${(text||'').length}`);
-  const {results, errors, rawSamples} = await runChunksConcurrent(chunks, filename, apiKey);
-  const chunksFailed = errors.filter(e => e).length;
-  const chunksTotal = chunks.length;
-  const chunksOk = chunksTotal - chunksFailed;
-  if (chunksFailed === chunksTotal && chunksTotal > 0) {
-    const firstErr = errors.find(e => e) || 'unknown error';
-    const [code, detail] = firstErr.split(':').map(s => s.trim());
-    return res.status(502).json({
-      error: code || 'extraction_failed',
-      message: detail || 'Could not extract transactions. Please retry.',
-      chunks_total: chunksTotal, chunks_failed: chunksFailed,
-    });
-  }
-  const all = results.flat().map(normalizeTxn).filter(t => t.date && t.amount >= 0.01);
-  // Per-file dedupe: only collapse rows that match on (date, amount, direction, full merchant string)
-  // Now that merchant is verbatim, exact duplicate rows from the same statement are extremely rare;
-  // this protects against accidental double-extraction within a single chunk only.
-  const seen = new Map();
-  const unique = [];
-  for (const t of all) {
-    const key = `${t.date}|${t.amount}|${t.merchant}|${t.direction}`;
-    const count = seen.get(key) || 0;
-    if (count < 3) { seen.set(key, count + 1); unique.push(t); }
-  }
-  // Stamp seq numbers (1-indexed) in document order. The frontend will prefix
-  // these with a per-upload file index ("1-12" = file 1, line 12). Together
-  // with lines_detected this lets the user audit capture: every seq from
-  // 1..total_seq must land somewhere — bucket, Tally-out, or recycle bin —
-  // for the file's coverage to read 100%.
-  unique.forEach((t, i) => { t.seq = i + 1; });
-  let linesDetected = 0;
-  let claudeReported = false;
-  const allSkippedLines = [];
-  for (const s of rawSamples) {
-    if (s && typeof s.lines_detected === 'number') {
-      linesDetected += s.lines_detected;
-      claudeReported = true;
-    }
-    if (s && Array.isArray(s.skipped_lines)) {
-      for (const ln of s.skipped_lines) {
-        if (typeof ln === 'string' && ln.trim()) {
-          allSkippedLines.push(ln.trim().slice(0, 300));
-        }
-      }
+
+  let input = text;
+  let wasTruncated = false;
+  if (input.length > MAX_TOTAL_CHARS) { input = input.slice(0, MAX_TOTAL_CHARS); wasTruncated = true; }
+
+  const {parser, rows, cleaned} = deterministicExtract(input);
+  let transactions = rows;
+  let usedFallback = false;
+  let fallbackError = null;
+
+  if (transactions.length === 0 && allow_ai_fallback) {
+    try {
+      transactions = dedupePreserveOrder(await fallbackAiExtract(cleaned, filename, apiKey));
+      usedFallback = transactions.length > 0;
+    } catch (err) {
+      fallbackError = err.message;
     }
   }
+
+  const summary = summarizeTransactions(transactions);
   const response = {
-    transactions: unique, count: unique.length, filename: filename || null,
-    chunks_total: chunksTotal, chunks_ok: chunksOk, chunks_failed: chunksFailed,
+    transactions,
+    count: transactions.length,
+    filename: filename || null,
+    parser: parser || (usedFallback ? 'ai_fallback' : null),
+    deterministic: Boolean(parser),
+    ai_fallback_used: usedFallback,
     text_chars: cleaned.length,
-    lines_detected: claudeReported ? linesDetected : null,
-    total_seq: unique.length, // highest seq number assigned (= unique.length)
-    skipped_lines: allSkippedLines, // raw text of any lines Claude couldn't extract
+    lines_detected: transactions.length,
+    total_seq: transactions.length,
+    skipped_lines: [],
+    summary,
   };
-  if (chunksFailed > 0) {
-    const errSamples = errors.filter(e => e).slice(0, 3);
-    const errSummary = errSamples.map(e => e.split(':')[0]).join(', ');
-    response.warning = `${chunksFailed} of ${chunksTotal} sections failed (${errSummary}). Results may be incomplete — consider splitting this file.`;
-    response.error_details = errSamples;
-    response.suggestion = 'partial_split_recommended';
-  }
-  if (truncated) {
-    response.warning = (response.warning ? response.warning + ' Additionally, ' : '') +
-      `this file was truncated at ${MAX_TOTAL_CHARS} chars (original was ${originalLen}). Split for complete analysis.`;
-  }
-  if (unique.length === 0 && chunksFailed === 0) {
-    response.warning = 'No transactions were found in this file. It may be a summary page, cover page, or unsupported statement format.';
-    response.diagnostic = {
-      cleaned_chars: cleaned.length,
-      chunks_processed: chunksTotal,
-      sample_text: cleaned.slice(0, 200),
-      claude_samples: rawSamples,
-    };
-    console.log('Zero txns returned. Raw samples:', JSON.stringify(rawSamples));
+  if (wasTruncated) response.warning = `Text was truncated at ${MAX_TOTAL_CHARS} chars. Results may be incomplete.`;
+  if (fallbackError) response.warning = `No deterministic parser matched and AI fallback failed: ${fallbackError}`;
+  if (transactions.length === 0 && !response.warning) {
+    response.warning = 'No transactions found. This may be an image-only file, a non-statement document, or a format that needs another parser.';
+    response.diagnostic = {sample_text: cleaned.slice(0, 500)};
   }
   return res.status(200).json(response);
 }
 
+const INSIGHT_PROMPT = `You are a thoughtful financial coach. Given categorized spending data, write one specific, kind, actionable observation. Use actual amounts and merchants. Output JSON only: {"headline":"...","detail":"...","tone":"neutral|warning|encouraging"}.`;
+
 async function handleInsight(req, res, apiKey) {
-  const {summary} = req.body || {};
-  if (!summary || typeof summary !== 'object') {
-    return res.status(400).json({
-      error: 'missing_summary',
-      message: 'No summary data provided.',
-    });
-  }
-  const userContent = `Spending summary (${summary.period || 'recent period'}):
-
-Income:                 AED ${summary.totals?.income || 0}
-Expenses:               AED ${summary.totals?.expenses || 0}
-Savings & Investments:  AED ${summary.totals?.savings_investments || 0}
-Loan/card payments:     AED ${summary.totals?.loans || 0}
-Net surplus:            AED ${(summary.totals?.income || 0) - (summary.totals?.expenses || 0) - (summary.totals?.savings_investments || 0) - (summary.totals?.loans || 0)} over ${summary.months || 1} months
-
-Top expenses by merchant (excludes savings transfers; ${summary.top_merchants?.length || 0}):
-${(summary.top_merchants || []).slice(0, 15).map(m => `- ${m.merchant}: AED ${m.total} (${m.count}x, ${m.category})`).join('\n')}
-
-Spend by sub-category:
-${Object.entries(summary.by_sub || {}).map(([k, v]) => `- ${k}: AED ${v}`).join('\n')}
-
-${summary.month_over_month ? `Month-over-month: ${summary.month_over_month}` : ''}
-
-Now write ONE observation per the rules. Focus on what's genuinely interesting. Do NOT moralize about whether spending is "avoidable" — the user decides that. Just surface patterns they might not have noticed.`;
-
+  const {summary, transactions = []} = req.body || {};
+  const effective = summary || summarizeTransactions(transactions);
+  const userContent = JSON.stringify(effective, null, 2).slice(0, 9000);
   try {
-    const raw = await callClaude({
-      prompt: INSIGHT_PROMPT,
-      userContent,
-      apiKey,
-      maxTokens: INSIGHT_MAX_TOKENS,
-      timeoutMs: INSIGHT_TIMEOUT_MS,
-    });
+    const raw = await callClaude({prompt: INSIGHT_PROMPT, userContent, apiKey, maxTokens: INSIGHT_MAX_TOKENS, timeoutMs: INSIGHT_TIMEOUT_MS});
     const obj = parseJsonObject(raw);
-    if (!obj || !obj.headline) {
-      return res.status(200).json({
-        headline: null,
-        detail: null,
-        tone: 'neutral',
-        warning: 'Could not generate insight — please try again',
-      });
-    }
-    return res.status(200).json({
-      headline: String(obj.headline).slice(0, 200),
-      detail: obj.detail ? String(obj.detail).slice(0, 250) : null,
-      tone: ['neutral', 'warning', 'encouraging'].includes(obj.tone) ? obj.tone : 'neutral',
-    });
+    if (!obj || !obj.headline) throw new Error('bad_insight_json');
+    return res.status(200).json({headline: String(obj.headline).slice(0, 180), detail: obj.detail ? String(obj.detail).slice(0, 260) : null, tone: ['neutral','warning','encouraging'].includes(obj.tone) ? obj.tone : 'neutral'});
   } catch (err) {
-    console.error('Insight error:', err.message);
-    return res.status(200).json({
-      headline: null,
-      detail: null,
-      tone: 'neutral',
-      warning: err.message,
-    });
+    // Insight must never block the dashboard.
+    return res.status(200).json({headline: null, detail: null, tone: 'neutral', warning: err.message});
   }
 }
 
 export default async function handler(req, res) {
   setCors(res);
   if (req.method === 'OPTIONS') return res.status(200).end();
-  if (req.method !== 'POST')    return res.status(405).json({error: 'method_not_allowed', message: 'Use POST'});
+  if (req.method !== 'POST') return res.status(405).json({error: 'method_not_allowed', message: 'Use POST'});
 
   const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) {
-    return res.status(500).json({
-      error: 'config_missing',
-      message: 'Server not configured. Please contact support.',
-    });
-  }
-
   try {
     const action = req.body?.action;
     if (action === 'extract') return await handleExtract(req, res, apiKey);
     if (action === 'insight') return await handleInsight(req, res, apiKey);
-    return res.status(400).json({
-      error: 'bad_action',
-      message: 'Unknown action. Expected "extract" or "insight".',
-    });
+    return res.status(400).json({error: 'bad_action', message: 'Unknown action. Expected extract or insight.'});
   } catch (err) {
     console.error('Handler error:', err);
-    return res.status(500).json({
-      error: 'unexpected',
-      message: err.message || 'An unexpected error occurred. Please retry.',
-    });
+    return res.status(500).json({error: 'unexpected', message: err.message || 'Unexpected server error'});
   }
 }
