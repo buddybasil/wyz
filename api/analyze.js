@@ -37,7 +37,6 @@ function cleanStatementText(text) {
 
   let t = String(text).replace(/\r/g, '\n');
 
-  // Remove Arabic/Hebrew/Indic blocks that often duplicate English labels in bilingual statements.
   t = t.replace(
     /[\u0590-\u05FF\u0600-\u06FF\u0700-\u074F\u0750-\u077F\u0780-\u07BF\u08A0-\u08FF\u0900-\u097F\uFB50-\uFDFF\uFE70-\uFEFF]/g,
     ' '
@@ -58,9 +57,7 @@ function cleanStatementText(text) {
 function parseAmount(v) {
   if (v == null) return 0;
 
-  const raw = String(v).trim();
-
-  const cleaned = raw
+  const cleaned = String(v)
     .replace(/,/g, '')
     .replace(/[^\d.\-()[\]]/g, '');
 
@@ -78,13 +75,6 @@ function parseSignedAmount(v) {
   };
 }
 
-function isoFromDMY(s) {
-  const m = String(s || '').trim().match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);
-  if (!m) return null;
-
-  return `${m[3]}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}`;
-}
-
 function isoFromAnyDate(s) {
   const raw = String(s || '').trim();
 
@@ -97,7 +87,7 @@ function isoFromAnyDate(s) {
   const a = Number(m[1]);
   const b = Number(m[2]);
 
-  // Default to DD/MM/YYYY because the tested UAE statements use this style.
+  // Default to DD/MM/YYYY for UAE-style statements.
   // If second part cannot be a month, assume MM/DD/YYYY.
   if (b > 12 && a <= 12) {
     return `${m[3]}-${String(a).padStart(2, '0')}-${String(b).padStart(2, '0')}`;
@@ -158,7 +148,6 @@ function isInternalTransferLike(t) {
   const m = String(t.merchant || '').toUpperCase();
 
   // Credit-card settlement/payment rows.
-  // These are not income or spending; they are movements between bank/card accounts.
   if (
     /PAYMENT\s*RECEIVED/.test(m) ||
     /PAYMENTRECEIVED/.test(m) ||
@@ -170,8 +159,7 @@ function isInternalTransferLike(t) {
     return true;
   }
 
-  // Self/family transfers.
-  // These are excluded from P/L even if they are CR, because they are internal/family cash movements.
+  // Self/family transfers and person-to-person app transfers.
   if (
     /\bTRF\s*OUT\s*TO\s+BASIL\s+ABRAHAM\b/.test(m) ||
     /\bTRF\s*OUT\s*TO\s+BASIL\b/.test(m) ||
@@ -186,8 +174,7 @@ function isInternalTransferLike(t) {
     return true;
   }
 
-  // Uncertain incoming credits.
-  // Safer to ignore first; user can manually move these to Income after review.
+  // Uncertain incoming credits: ignore first, user can move to Income after review.
   if (
     /\bB\/O\s+ALLIANCE\s+INSURANCE\b/.test(m) ||
     /\bALLIANCE\s+INSURANCE\b/.test(m)
@@ -233,7 +220,7 @@ function makeTxn({ date, merchant, amount, currency = 'AED', direction, parser =
 
   const txn = {
     date,
-    merchant: normalizeSpaces(merchant).slice(0, 280) || 'Unknown',
+    merchant: normalizeSpaces(merchant).slice(0, 420) || 'Unknown',
     amount: Math.round(amt * 100) / 100,
     currency,
     direction: direction === 'CR' ? 'CR' : 'DR',
@@ -247,7 +234,7 @@ function makeTxn({ date, merchant, amount, currency = 'AED', direction, parser =
     excluded_from_pl: false,
   };
 
-  if (raw) txn.raw = normalizeSpaces(raw).slice(0, 420);
+  if (raw) txn.raw = normalizeSpaces(raw).slice(0, 700);
 
   return categorizeTxn(txn);
 }
@@ -274,18 +261,15 @@ function parseTaggedSingleDate(text) {
     if (!m) continue;
 
     const dateIso = isoFromAnyDate(m[1]);
-    const marker = m[3].toUpperCase();
     const amount = parseAmount(m[4]);
 
     if (!dateIso || amount <= 0) continue;
-
-    const direction = /^(CR|C|CREDIT)$/.test(marker) ? 'CR' : 'DR';
 
     rows.push(makeTxn({
       date: dateIso,
       merchant: m[2],
       amount,
-      direction,
+      direction: /^(CR|C|CREDIT)$/i.test(m[3]) ? 'CR' : 'DR',
       parser: 'tagged_single_date',
       raw: line,
     }));
@@ -321,15 +305,10 @@ function parseTwoDateCard(text) {
 
     let direction = 'DR';
 
-    if (/^(CR|C|CREDIT)$/.test(marker)) {
-      direction = 'CR';
-    } else if (/^(DR|D|DEBIT)$/.test(marker)) {
-      direction = 'DR';
-    } else if (signed.isNegative) {
-      direction = 'DR';
-    } else if (/\b(payment received|paymentreceived|refund|reversal|cashback|credit adjustment)\b/i.test(desc)) {
-      direction = 'CR';
-    }
+    if (/^(CR|C|CREDIT)$/.test(marker)) direction = 'CR';
+    else if (/^(DR|D|DEBIT)$/.test(marker)) direction = 'DR';
+    else if (signed.isNegative) direction = 'DR';
+    else if (/\b(payment received|paymentreceived|refund|reversal|cashback|credit adjustment)\b/i.test(desc)) direction = 'CR';
 
     rows.push(makeTxn({
       date: dateIso,
@@ -344,6 +323,46 @@ function parseTwoDateCard(text) {
   return compactRows(rows);
 }
 
+function fixAccountAmountOcr(s) {
+  return String(s || '')
+    .replace(/\b[Il]OO\b/g, '100')
+    .replace(/\b[Il]00\b/g, '100')
+    .replace(/\bO\.OO\b/gi, '0.00')
+    .replace(/\bO\.00\b/gi, '0.00')
+    .replace(/\b0\.OO\b/gi, '0.00');
+}
+
+function inferAccountDirection(desc) {
+  const m = String(desc || '').toUpperCase();
+
+  if (
+    /\bSEND\s+MONEY\s+VIA\s+AANI\b/.test(m) ||
+    /\bTRF\s*OUT\b/.test(m) ||
+    /\bPUR\b/.test(m) ||
+    /\bATM\s+WDL\b/.test(m) ||
+    /\bINSTALLMENT\s+RECOVERY\b/.test(m) ||
+    /\bCREDIT\s+CARD\s+PAYMNT\b/.test(m) ||
+    /\bCREDIT\s+CARD\s+PAYMENT\b/.test(m) ||
+    /\bFOREIGN\s+TRANSACTION\s+FEE\b/.test(m) ||
+    /\bI\/W\s+CLEARING\s+CHEQUE\b/.test(m)
+  ) {
+    return 'DR';
+  }
+
+  if (
+    /\bSALARY\b/.test(m) ||
+    /\bB\/O\b/.test(m) ||
+    /\bDIVIDEND\b/.test(m) ||
+    /\bREFUND\b/.test(m) ||
+    /\bDEPOSIT\b/.test(m) ||
+    /\bUNION\s+HOLDING\b/.test(m)
+  ) {
+    return 'CR';
+  }
+
+  return null;
+}
+
 function parseAccountTable(text) {
   const rawLines = String(text || '')
     .split(/\n+/)
@@ -351,11 +370,8 @@ function parseAccountTable(text) {
     .filter(Boolean);
 
   const rows = [];
-
   const datePat = '(?:\\d{1,2}[\\/\\-]\\d{1,2}[\\/\\-]\\d{4}|\\d{4}[\\/\\-]\\d{1,2}[\\/\\-]\\d{1,2})';
 
-  // Rebuild records because browser PDF extraction often splits one table row into multiple lines:
-  // posting date, time, value date, description, ref, debit, credit, balance.
   const records = [];
   let current = [];
 
@@ -366,13 +382,12 @@ function parseAccountTable(text) {
     }
   }
 
-  for (let i = 0; i < rawLines.length; i++) {
-    const line = rawLines[i];
-
+  for (const line of rawLines) {
     if (isNoiseLine(line)) continue;
 
-    const startsRecord =
-      new RegExp(`^${datePat}(?:\\s+\\d{1,2}:\\d{2}(?::\\d{2})?)?(?:\\s+${datePat})?\\b`).test(line);
+    const startsRecord = new RegExp(
+      `^${datePat}(?:\\s+\\d{1,2}:\\d{2}(?::\\d{2})?)?(?:\\s+${datePat})?\\b`
+    ).test(line);
 
     if (startsRecord) {
       flush();
@@ -385,77 +400,76 @@ function parseAccountTable(text) {
   flush();
 
   for (const rec0 of records) {
-    const rec = normalizeSpaces(rec0);
+    const rec = normalizeSpaces(fixAccountAmountOcr(rec0));
     if (!rec) continue;
 
     const dateMatches = [...rec.matchAll(new RegExp(datePat, 'g'))];
-
     if (!dateMatches.length) continue;
 
-    const postingDateRaw = dateMatches[0][0];
-    const postingDateIso = isoFromAnyDate(postingDateRaw);
+    const postingDateIso = isoFromAnyDate(dateMatches[0][0]);
     if (!postingDateIso) continue;
 
-    // Remove leading posting date, optional time, and optional value date.
-    let rest = rec.slice(dateMatches[0].index + postingDateRaw.length).trim();
+    let rest = rec.slice(dateMatches[0].index + dateMatches[0][0].length).trim();
+
     rest = rest.replace(/^\d{1,2}:\d{2}(?::\d{2})?\s+/, '').trim();
 
-    const secondDateMatch = rest.match(new RegExp(`^(${datePat})\\b`));
-    if (secondDateMatch) {
-      rest = rest.slice(secondDateMatch[0].length).trim();
-    }
+    const second = rest.match(new RegExp(`^(${datePat})\\b`));
+    if (second) rest = rest.slice(second[0].length).trim();
 
-    // For bank account rows, the last three numeric tokens are:
-    // Debit Amount | Credit Amount | Balance
-    //
-    // Example:
-    // 638472817 B/O DENNY JOHN ELIAS PHUB6384728 17 0.00 122 10292.6
-    //
-    // The transaction amount is 122 from Credit Amount.
-    // The balance 10292.6 must NEVER be used as transaction amount.
     const nums = [...rest.matchAll(/(?:^|\s)(-?\(?\d{1,3}(?:,\d{3})*(?:\.\d+)?\)?|-?\(?\d+(?:\.\d+)?\)?)(?=\s|$)/g)];
 
-    if (nums.length < 3) continue;
+    if (nums.length < 2) continue;
 
-    const debitToken = nums[nums.length - 3][1];
-    const creditToken = nums[nums.length - 2][1];
-    const balanceToken = nums[nums.length - 1][1];
+    // Balance is the right-most numeric column in account statements.
+    // It is NEVER used as transaction amount.
+    const balanceMatch = nums[nums.length - 1];
+    const balance = parseAmount(balanceMatch[1]);
 
-    const debit = parseAmount(debitToken);
-    const credit = parseAmount(creditToken);
-    const balance = parseAmount(balanceToken);
-
-    // Balance is only used to confirm row shape.
-    // It must not become amount.
     if (!Number.isFinite(balance)) continue;
 
     let amount = 0;
     let direction = null;
+    let amountStartIndex = null;
 
-    if (debit > 0 && credit === 0) {
-      amount = debit;
-      direction = 'DR';
-    } else if (credit > 0 && debit === 0) {
-      amount = credit;
-      direction = 'CR';
-    } else if (credit > 0 && debit > 0) {
-      // Ambiguous row. Do not guess.
-      continue;
+    if (nums.length >= 3) {
+      // Normal case:
+      // Debit Amount | Credit Amount | Balance
+      const debitMatch = nums[nums.length - 3];
+      const creditMatch = nums[nums.length - 2];
+
+      const debit = parseAmount(debitMatch[1]);
+      const credit = parseAmount(creditMatch[1]);
+
+      if (debit > 0 && credit === 0) {
+        amount = debit;
+        direction = 'DR';
+        amountStartIndex = debitMatch.index;
+      } else if (credit > 0 && debit === 0) {
+        amount = credit;
+        direction = 'CR';
+        amountStartIndex = debitMatch.index;
+      } else {
+        continue;
+      }
     } else {
-      continue;
+      // Some rows omit/damage the 0.00 column.
+      // Pattern becomes:
+      // Transaction Amount | Balance
+      const txnMatch = nums[nums.length - 2];
+      const possibleAmount = parseAmount(txnMatch[1]);
+      const descBeforeAmount = rest.slice(0, txnMatch.index).trim();
+      const inferred = inferAccountDirection(descBeforeAmount);
+
+      if (!inferred || possibleAmount <= 0) continue;
+
+      amount = possibleAmount;
+      direction = inferred;
+      amountStartIndex = txnMatch.index;
     }
 
-    // Description/ref area is everything before the debit column.
-    const descEnd = nums[nums.length - 3].index;
-    let body = rest.slice(0, descEnd).trim();
+    if (!direction || amount <= 0 || amountStartIndex == null) continue;
 
-    // Remove trailing reference tokens while keeping useful description.
-    body = body
-      .replace(/\s+(PHUB\d+)\s*$/i, '')
-      .replace(/\s+([A-Z0-9]{10,})\s*$/i, '')
-      .replace(/\s+(\d{8,})\s*$/i, '')
-      .replace(/\s+(A[0-9A-Z]{2,}|[0-9A-Z]{4})\s*$/i, '')
-      .trim();
+    let body = rest.slice(0, amountStartIndex).trim();
 
     body = body
       .replace(/\b(REF\/CHEQUE\s+NO|DEBIT\s+AMOUNT|CREDIT\s+AMOUNT|BALANCE)\b/gi, '')
@@ -642,7 +656,6 @@ function dedupePreserveOrder(items) {
     const key = `${t.date}|${t.direction}|${Number(t.amount).toFixed(2)}|${String(t.merchant).toUpperCase()}`;
     const count = seen.get(key) || 0;
 
-    // Keep up to 4 identical rows because real statements can have genuine repeated same-day transactions.
     if (count < 4) {
       seen.set(key, count + 1);
       out.push(t);
@@ -749,10 +762,8 @@ function extractTransactionTableRegion(text) {
     }
   }
 
-  const region = lines.slice(start, end).join('\n');
-
   return {
-    text: region,
+    text: lines.slice(start, end).join('\n'),
     found: true,
     reason: null,
     startIndex: start,
@@ -771,8 +782,6 @@ function makeParseReport({ filename, parser, rows, cleaned, candidates, warning 
     ? 'Candidate rows counted only within detected transaction-table region.'
     : 'Transaction-table region was not confidently detected, so full text was used.';
 
-  // Some PDFs extract transaction rows before the visible table header.
-  // If the detected table region clearly undercounts compared with extracted rows, fall back.
   if (tableRegion.found && tableCandidate.count < Math.max(1, rows.length * 0.5)) {
     candidate = fullCandidate;
     qualityScope = 'full_text_fallback';
@@ -785,11 +794,9 @@ function makeParseReport({ filename, parser, rows, cleaned, candidates, warning 
   let confidence = 0;
 
   if (extracted > 0) {
-    if (candidate.count > 0) {
-      confidence = Math.min(0.99, extracted / Math.max(extracted, candidate.count));
-    } else {
-      confidence = 0.85;
-    }
+    confidence = candidate.count > 0
+      ? Math.min(0.99, extracted / Math.max(extracted, candidate.count))
+      : 0.85;
 
     if (/generic|signed|csv/i.test(parser || '')) {
       confidence = Math.max(0.62, confidence - 0.08);
@@ -854,21 +861,10 @@ function deterministicExtract(text, filename = null) {
 
   if (isBankAccount) {
     const accountCandidate = candidates.find(c => c.name === 'account_table');
+    best = accountCandidate && accountCandidate.rows.length > 0 ? accountCandidate : null;
+  }
 
-    if (accountCandidate && accountCandidate.rows.length > 0) {
-      best = accountCandidate;
-    } else {
-      candidates.sort((a, b) => {
-        const bs = scoreParse(b.rows, cleaned);
-        const as = scoreParse(a.rows, cleaned);
-
-        if (bs !== as) return bs - as;
-        return b.rows.length - a.rows.length;
-      });
-
-      best = candidates[0];
-    }
-  } else {
+  if (!best) {
     candidates.sort((a, b) => {
       const bs = scoreParse(b.rows, cleaned);
       const as = scoreParse(a.rows, cleaned);
@@ -914,15 +910,10 @@ function summarizeTransactions(txns) {
   for (const t of txns) {
     const amt = Number(t.amount) || 0;
 
-    if (t.cat === 'income') {
-      totals.income += amt;
-    } else if (t.cat === 'savings_investments') {
-      totals.savings_investments += amt;
-    } else if (t.cat === 'internal_transfer') {
-      totals.internal_transfer += amt;
-    } else {
-      totals.expenses += amt;
-    }
+    if (t.cat === 'income') totals.income += amt;
+    else if (t.cat === 'savings_investments') totals.savings_investments += amt;
+    else if (t.cat === 'internal_transfer') totals.internal_transfer += amt;
+    else totals.expenses += amt;
   }
 
   totals.pl = totals.income - totals.expenses - totals.savings_investments;
