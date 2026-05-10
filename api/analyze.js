@@ -1,4 +1,9 @@
 // WYZ API - Generic Statement Analyzer with Internal Transfer Exclusion
+// Quality-report improvement:
+// - Parser still extracts from the full readable text.
+// - Quality report now counts candidate rows from the transaction-table region only where possible.
+// - This avoids false low confidence caused by statement date, due date, opening balance,
+//   total amount due, summaries, and other non-transaction metadata.
 // Default logic:
 // - CR -> income
 // - DR -> expenses
@@ -39,7 +44,7 @@ function cleanStatementText(text) {
   t = t.replace(/General Terms and Important Information[\s\S]*$/i, '');
   t = t.replace(/Terms\s+(and|&)\s+Conditions[\s\S]{200,}$/i, '');
   t = t.replace(/Important (Information|Notice|Disclaimer)[\s\S]{200,}$/i, '');
-  t = t.replace(/\*{3,}\s*END\s*OF\s*STATEMENT\s*\*{3,}/gi, '\nEND_OF_STATEMENT\n');
+  t = t.replace(/\*{3,}\s*END\s*OF\s*STATEMENT\s*\*{3,}/gi, '\n******* END OF STATEMENT *******\n');
   t = t.replace(/https?:\/\/\S+/g, ' ');
   t = t.replace(/[\w.-]+@[\w.-]+\.\w+/g, ' ');
   t = t.replace(/[ \t]+/g, ' ');
@@ -87,6 +92,8 @@ function isoFromAnyDate(s) {
   const a = Number(m[1]);
   const b = Number(m[2]);
 
+  // Default to DD/MM/YYYY because the current tested statements use UAE-style dates.
+  // If the second part cannot be a month, assume MM/DD/YYYY.
   if (b > 12 && a <= 12) {
     return `${m[3]}-${String(a).padStart(2, '0')}-${String(b).padStart(2, '0')}`;
   }
@@ -556,6 +563,7 @@ function dedupePreserveOrder(items) {
     const key = `${t.date}|${t.direction}|${Number(t.amount).toFixed(2)}|${String(t.merchant).toUpperCase()}`;
     const count = seen.get(key) || 0;
 
+    // Keep up to 4 identical rows because real statements can have genuine repeated same-day transactions.
     if (count < 4) {
       seen.set(key, count + 1);
       out.push(t);
@@ -600,29 +608,134 @@ function countCandidateRows(text) {
   return { count, samples };
 }
 
+function extractTransactionTableRegion(text) {
+  const lines = String(text || '')
+    .split(/\n+/)
+    .map(normalizeSpaces)
+    .filter(Boolean);
+
+  if (!lines.length) {
+    return {
+      text: '',
+      found: false,
+      reason: 'empty_text',
+      startIndex: -1,
+      endIndex: -1,
+    };
+  }
+
+  const startPatterns = [
+    /Transaction Date/i,
+    /Posting Date\s+Value Date\s+Description/i,
+    /Transaction Description/i,
+    /Debit Amount\s+Credit Amount\s+Balance/i,
+    /Amount in AED/i,
+  ];
+
+  const endPatterns = [
+    /\*{3,}\s*END\s*OF\s*STATEMENT\s*\*{3,}/i,
+    /General Terms and Important Information/i,
+    /Commercial Bank of Dubai PSC/i,
+    /licensed by the Central Bank/i,
+  ];
+
+  let start = -1;
+
+  for (let i = 0; i < lines.length; i++) {
+    const windowText = lines.slice(i, i + 8).join(' ');
+    if (startPatterns.some(p => p.test(windowText))) {
+      start = i + 1;
+      break;
+    }
+  }
+
+  if (start < 0) {
+    return {
+      text: text,
+      found: false,
+      reason: 'transaction_table_header_not_found',
+      startIndex: -1,
+      endIndex: -1,
+    };
+  }
+
+  let end = lines.length;
+
+  for (let i = start; i < lines.length; i++) {
+    const line = lines[i];
+    if (endPatterns.some(p => p.test(line))) {
+      end = i;
+      break;
+    }
+  }
+
+  const region = lines.slice(start, end).join('\n');
+
+  return {
+    text: region,
+    found: true,
+    reason: null,
+    startIndex: start,
+    endIndex: end,
+  };
+}
+
 function makeParseReport({ filename, parser, rows, cleaned, candidates, warning = null }) {
-  const candidate = countCandidateRows(cleaned);
+  const fullCandidate = countCandidateRows(cleaned);
+  const tableRegion = extractTransactionTableRegion(cleaned);
+  const tableCandidate = countCandidateRows(tableRegion.text);
+
+  let candidate = tableCandidate;
+  let qualityScope = tableRegion.found ? 'transaction_table_region' : 'full_text_fallback';
+  let qualityNote = tableRegion.found
+    ? 'Candidate rows counted only within detected transaction-table region.'
+    : 'Transaction-table region was not confidently detected, so full text was used.';
+
+  // Some PDFs extract the transaction rows before the visible table header.
+  // If the detected table region clearly undercounts compared with extracted rows, fall back.
+  if (tableRegion.found && tableCandidate.count < Math.max(1, rows.length * 0.5)) {
+    candidate = fullCandidate;
+    qualityScope = 'full_text_fallback';
+    qualityNote = 'Detected table region undercounted rows due to PDF extraction order, so full text candidate count was used.';
+  }
+
   const extracted = rows.length;
   const rejected = Math.max(0, candidate.count - extracted);
 
   let confidence = 0;
 
   if (extracted > 0) {
-    confidence = Math.min(0.99, extracted / Math.max(extracted, Math.min(candidate.count || extracted, extracted + 12)));
-    if (/generic|signed|csv/i.test(parser || '')) confidence = Math.max(0.62, confidence - 0.08);
+    if (candidate.count > 0) {
+      confidence = Math.min(0.99, extracted / Math.max(extracted, candidate.count));
+    } else {
+      confidence = 0.85;
+    }
+
+    if (/generic|signed|csv/i.test(parser || '')) {
+      confidence = Math.max(0.62, confidence - 0.08);
+    }
   }
 
   const status = extracted === 0
     ? 'failed'
-    : rejected > Math.max(8, extracted * 0.25)
-      ? 'warning'
-      : 'ok';
+    : confidence >= 0.95
+      ? 'ok'
+      : confidence >= 0.75
+        ? 'review'
+        : 'review';
 
   const warnings = [];
 
   if (warning) warnings.push(warning);
-  if (extracted === 0) warnings.push('No transaction rows were extracted. This format may need OCR or another parser.');
-  else if (status === 'warning') warnings.push(`Parsed ${extracted} rows, but about ${rejected} candidate rows may need review.`);
+  if (extracted === 0) {
+    warnings.push('No transaction rows were extracted. This format may need OCR or another parser.');
+  } else if (status !== 'ok') {
+    warnings.push(`Extracted ${extracted} transaction rows against ${candidate.count} estimated transaction-table candidate rows. Review recommended.`);
+  }
+
+  if (qualityScope === 'full_text_fallback') {
+    warnings.push(qualityNote);
+  }
 
   return {
     filename: filename || null,
@@ -632,6 +745,9 @@ function makeParseReport({ filename, parser, rows, cleaned, candidates, warning 
     candidate_date_rows: candidate.count,
     transactions_extracted: extracted,
     rejected_rows_estimate: rejected,
+    quality_scope: qualityScope,
+    quality_note: qualityNote,
+    table_region_detected: tableRegion.found,
     parser_scores: (candidates || []).map(c => ({
       parser: c.name,
       rows: c.rows.length,
@@ -829,8 +945,8 @@ async function handleExtract(req, res) {
       sample_text: cleaned.slice(0, 700),
       parse_report,
     };
-  } else if (parse_report && parse_report.status === 'warning') {
-    response.warning = parse_report.warnings[0] || 'Some candidate rows may need review.';
+  } else if (parse_report && parse_report.status !== 'ok') {
+    response.warning = parse_report.warnings[0] || 'Some transaction-table rows may need review.';
   }
 
   return res.status(200).json(response);
