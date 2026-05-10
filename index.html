@@ -4,214 +4,1405 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1" />
   <title>Wyz - Know Your Money</title>
+
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+
   <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+
   <style>
-    :root{--bg:#f7f6f2;--card:#fff;--ink:#171411;--muted:#756f68;--line:#e7e0d7;--green:#0d8a53;--red:#c0392b;--amber:#9a6500;--soft:#faf7f1;--shadow:0 12px 28px rgba(0,0,0,.07);--r:20px}
-    *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font-family:'DM Sans',system-ui,-apple-system,Segoe UI,sans-serif}.top{height:76px;background:var(--card);border-bottom:1px solid var(--line);display:flex;align-items:center;justify-content:space-between;padding:0 28px;position:sticky;top:0;z-index:3}.brand{display:flex;gap:12px;align-items:center;font-weight:800;font-size:22px}.logo{width:38px;height:38px;border-radius:12px;background:#161412;color:white;display:grid;place-items:center}.pill{padding:7px 12px;border:1px solid #b6e5c9;background:#ecfff4;color:#087644;border-radius:999px;font-weight:700;font-size:13px}.wrap{max-width:1160px;margin:0 auto;padding:34px 22px 70px}.hero{display:grid;grid-template-columns:1.1fr .9fr;gap:24px;align-items:start}.card{background:var(--card);border:1px solid var(--line);border-radius:var(--r);box-shadow:var(--shadow)}.upload{padding:28px}.upload h1{font-size:30px;margin:0 0 8px}.upload p{color:var(--muted);margin:0 0 22px;line-height:1.55}.drop{border:2px dashed #d8d1ca;border-radius:18px;padding:36px;text-align:center;background:#fff;cursor:pointer;transition:.18s}.drop:hover{border-color:#222;background:#fffdf8}.drop svg{width:46px;height:46px;color:var(--green)}.drop strong{display:block;font-size:20px;margin:10px 0 4px}.drop span{color:var(--muted)}.chips{margin-top:12px;display:flex;justify-content:center;gap:8px}.chip{font-size:12px;border:1px solid var(--line);background:#fbfaf7;padding:5px 10px;border-radius:999px}.files{margin-top:16px;display:grid;gap:10px}.file{display:flex;align-items:center;justify-content:space-between;border:1px solid var(--line);background:#fff;border-radius:13px;padding:12px 14px}.file small{color:var(--muted)}button{appearance:none;border:0;background:#161412;color:#fff;border-radius:13px;padding:15px 20px;font-weight:800;font-size:16px;cursor:pointer}button:disabled{opacity:.45;cursor:not-allowed}.primary{width:100%;margin-top:16px}.side{padding:22px}.side h2{margin:0 0 14px;font-size:18px}.status{display:grid;gap:10px}.step{display:flex;gap:10px;align-items:center;color:var(--muted)}.dot{width:10px;height:10px;border-radius:50%;background:#ddd}.step.on{color:var(--ink);font-weight:700}.step.on .dot{background:var(--green)}.msg{margin-top:16px;padding:14px;border-radius:14px;border:1px solid var(--line);background:var(--soft);color:var(--muted);line-height:1.45}.msg.err{background:#fff2f0;border-color:#f0b1aa;color:#ab241b}.msg.ok{background:#effbf3;border-color:#bfe6cd;color:#0b6c43}.dashboard{display:none;margin-top:26px}.grid{display:grid;grid-template-columns:repeat(4,1fr);gap:14px}.metric{padding:18px}.metric span{display:block;color:var(--muted);font-size:13px}.metric strong{display:block;margin-top:5px;font-size:24px}.tools{display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between;margin:18px 0}.tools input,.tools select{border:1px solid var(--line);border-radius:12px;background:#fff;padding:12px;font:inherit;min-width:180px}.tableWrap{overflow:auto;border-radius:18px;border:1px solid var(--line);background:#fff;max-height:620px}table{width:100%;border-collapse:collapse;font-size:14px}th,td{padding:12px 14px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top;white-space:nowrap}th{position:sticky;top:0;background:#fbfaf7;z-index:1;color:#5f5952}.merchant{white-space:normal;min-width:280px}.tag{display:inline-block;border-radius:999px;padding:4px 9px;font-size:12px;font-weight:700;background:#f2eee8;color:#4b453e}.tag.CR{background:#e9f8ef;color:#087644}.tag.DR{background:#fff0ed;color:#a83225}.insight{padding:18px;margin:18px 0;background:#161412;color:#fff;border-radius:18px}.insight h3{margin:0 0 6px}.insight p{margin:0;color:#ddd}.mini{font-size:12px;color:var(--muted)}@media(max-width:880px){.hero{grid-template-columns:1fr}.grid{grid-template-columns:1fr 1fr}.top{padding:0 18px}.wrap{padding:24px 14px}.drop{padding:24px}th,td{padding:10px}}
+    :root{
+      --bg:#f7f6f2;
+      --card:#fff;
+      --ink:#171411;
+      --muted:#756f68;
+      --line:#e7e0d7;
+      --green:#0d8a53;
+      --red:#c0392b;
+      --amber:#9a6500;
+      --soft:#faf7f1;
+      --shadow:0 12px 28px rgba(0,0,0,.07);
+      --r:20px;
+      --blue:#1f6fff;
+      --purple:#7d4cff;
+    }
+
+    *{box-sizing:border-box}
+
+    body{
+      margin:0;
+      background:var(--bg);
+      color:var(--ink);
+      font-family:'DM Sans',system-ui,-apple-system,Segoe UI,sans-serif;
+    }
+
+    .top{
+      height:76px;
+      background:var(--card);
+      border-bottom:1px solid var(--line);
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      padding:0 28px;
+      position:sticky;
+      top:0;
+      z-index:3;
+    }
+
+    .brand{
+      display:flex;
+      gap:12px;
+      align-items:center;
+      font-weight:800;
+      font-size:22px;
+    }
+
+    .logo{
+      width:38px;
+      height:38px;
+      border-radius:12px;
+      background:#161412;
+      color:white;
+      display:grid;
+      place-items:center;
+    }
+
+    .pill{
+      padding:7px 12px;
+      border:1px solid #b6e5c9;
+      background:#ecfff4;
+      color:#087644;
+      border-radius:999px;
+      font-weight:700;
+      font-size:13px;
+    }
+
+    .wrap{
+      max-width:1160px;
+      margin:0 auto;
+      padding:34px 22px 70px;
+    }
+
+    .hero{
+      display:grid;
+      grid-template-columns:1.1fr .9fr;
+      gap:24px;
+      align-items:start;
+    }
+
+    .card{
+      background:var(--card);
+      border:1px solid var(--line);
+      border-radius:var(--r);
+      box-shadow:var(--shadow);
+    }
+
+    .upload{padding:28px}
+    .upload h1{font-size:30px;margin:0 0 8px}
+    .upload p{color:var(--muted);margin:0 0 22px;line-height:1.55}
+
+    .drop{
+      border:2px dashed #d8d1ca;
+      border-radius:18px;
+      padding:36px;
+      text-align:center;
+      background:#fff;
+      cursor:pointer;
+      transition:.18s;
+    }
+
+    .drop:hover{border-color:#222;background:#fffdf8}
+    .drop svg{width:46px;height:46px;color:var(--green)}
+    .drop strong{display:block;font-size:20px;margin:10px 0 4px}
+    .drop span{color:var(--muted)}
+
+    .chips{
+      margin-top:12px;
+      display:flex;
+      justify-content:center;
+      gap:8px;
+    }
+
+    .chip{
+      font-size:12px;
+      border:1px solid var(--line);
+      background:#fbfaf7;
+      padding:5px 10px;
+      border-radius:999px;
+    }
+
+    .files{
+      margin-top:16px;
+      display:grid;
+      gap:10px;
+    }
+
+    .file{
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      border:1px solid var(--line);
+      background:#fff;
+      border-radius:13px;
+      padding:12px 14px;
+    }
+
+    .file small{color:var(--muted)}
+
+    button{
+      appearance:none;
+      border:0;
+      background:#161412;
+      color:#fff;
+      border-radius:13px;
+      padding:15px 20px;
+      font-weight:800;
+      font-size:16px;
+      cursor:pointer;
+    }
+
+    button:disabled{opacity:.45;cursor:not-allowed}
+
+    .primary{
+      width:100%;
+      margin-top:16px;
+    }
+
+    .ghostBtn{
+      background:#fff;
+      color:#171411;
+      border:1px solid var(--line);
+    }
+
+    .smallBtn{
+      padding:10px 12px;
+      font-size:13px;
+      border-radius:11px;
+    }
+
+    .side{padding:22px}
+    .side h2{margin:0 0 14px;font-size:18px}
+
+    .status{
+      display:grid;
+      gap:10px;
+    }
+
+    .step{
+      display:flex;
+      gap:10px;
+      align-items:center;
+      color:var(--muted);
+    }
+
+    .dot{
+      width:10px;
+      height:10px;
+      border-radius:50%;
+      background:#ddd;
+    }
+
+    .step.on{
+      color:var(--ink);
+      font-weight:700;
+    }
+
+    .step.on .dot{background:var(--green)}
+
+    .msg{
+      margin-top:16px;
+      padding:14px;
+      border-radius:14px;
+      border:1px solid var(--line);
+      background:var(--soft);
+      color:var(--muted);
+      line-height:1.45;
+    }
+
+    .msg.err{
+      background:#fff2f0;
+      border-color:#f0b1aa;
+      color:#ab241b;
+    }
+
+    .msg.ok{
+      background:#effbf3;
+      border-color:#bfe6cd;
+      color:#0b6c43;
+    }
+
+    .dashboard{
+      display:none;
+      margin-top:26px;
+    }
+
+    .section{
+      margin-top:16px;
+      overflow:hidden;
+    }
+
+    details.section>summary{
+      list-style:none;
+      cursor:pointer;
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      padding:16px 18px;
+      font-weight:800;
+      font-size:18px;
+    }
+
+    details.section>summary::-webkit-details-marker{display:none}
+
+    .summaryLeft{
+      display:flex;
+      gap:10px;
+      align-items:center;
+    }
+
+    .summaryMeta{
+      font-size:12px;
+      color:var(--muted);
+      font-weight:600;
+    }
+
+    .chev{
+      display:inline-flex;
+      align-items:center;
+      justify-content:center;
+      width:28px;
+      height:28px;
+      border-radius:999px;
+      border:1px solid var(--line);
+      color:var(--muted);
+      transition:transform .2s;
+    }
+
+    details[open] .chev{transform:rotate(180deg)}
+
+    .sectionBody{padding:0 18px 18px}
+
+    .grid{
+      display:grid;
+      grid-template-columns:repeat(auto-fit,minmax(170px,1fr));
+      gap:14px;
+    }
+
+    .metric{padding:18px}
+    .metric span{display:block;color:var(--muted);font-size:13px}
+    .metric strong{display:block;margin-top:5px;font-size:24px}
+    .metric small{display:block;color:var(--muted);margin-top:4px;font-size:12px}
+
+    .tools{
+      display:flex;
+      flex-wrap:wrap;
+      gap:10px;
+      align-items:center;
+      justify-content:space-between;
+      margin:4px 0 12px;
+    }
+
+    .tools input,
+    .tools select{
+      border:1px solid var(--line);
+      border-radius:12px;
+      background:#fff;
+      padding:12px;
+      font:inherit;
+      min-width:180px;
+    }
+
+    .tableWrap{
+      overflow:auto;
+      border-radius:18px;
+      border:1px solid var(--line);
+      background:#fff;
+      max-height:620px;
+    }
+
+    table{
+      width:100%;
+      border-collapse:collapse;
+      font-size:14px;
+    }
+
+    th,td{
+      padding:12px 14px;
+      border-bottom:1px solid var(--line);
+      text-align:left;
+      vertical-align:top;
+      white-space:nowrap;
+    }
+
+    th{
+      position:sticky;
+      top:0;
+      background:#fbfaf7;
+      z-index:1;
+      color:#5f5952;
+    }
+
+    .merchant{
+      white-space:normal;
+      min-width:280px;
+    }
+
+    .tag{
+      display:inline-block;
+      border-radius:999px;
+      padding:4px 9px;
+      font-size:12px;
+      font-weight:700;
+      background:#f2eee8;
+      color:#4b453e;
+    }
+
+    .tag.CR{background:#e9f8ef;color:#087644}
+    .tag.DR{background:#fff0ed;color:#a83225}
+    .tag.savings{background:#f0ecff;color:#6036c7}
+
+    .insight{
+      padding:18px;
+      background:#161412;
+      color:#fff;
+      border-radius:18px;
+    }
+
+    .insight h3{margin:0 0 6px}
+    .insight p{margin:0;color:#ddd}
+    .insight ul{margin:10px 0 0;padding-left:18px;color:#f0ece6}
+
+    .qualityInner h3{display:none}
+
+    .qrow{
+      display:grid;
+      grid-template-columns:1.6fr .8fr .7fr .8fr 1.4fr;
+      gap:10px;
+      padding:10px;
+      border-top:1px solid var(--line);
+      align-items:start;
+    }
+
+    .qrow:first-of-type{border-top:0}
+    .qok{color:var(--green);font-weight:800}
+    .qwarn{color:var(--amber);font-weight:800}
+    .qfail{color:var(--red);font-weight:800}
+    .mini{font-size:12px;color:var(--muted)}
+
+    .chartNote{
+      margin:0 0 10px;
+      color:var(--muted);
+      font-size:13px;
+      line-height:1.5;
+    }
+
+    .chartWrap{
+      border:1px solid var(--line);
+      border-radius:18px;
+      background:#fff;
+      padding:10px 12px;
+    }
+
+    .legend{
+      display:flex;
+      flex-wrap:wrap;
+      gap:12px;
+      margin:4px 0 8px;
+    }
+
+    .legend span{
+      display:inline-flex;
+      align-items:center;
+      gap:7px;
+      font-size:13px;
+      color:var(--muted);
+    }
+
+    .legend i{
+      display:inline-block;
+      width:12px;
+      height:12px;
+      border-radius:999px;
+    }
+
+    .chartSvg{
+      width:100%;
+      height:auto;
+      display:block;
+    }
+
+    .chartEmpty{
+      padding:22px;
+      color:var(--muted);
+      text-align:center;
+    }
+
+    .chartAxis{font-size:11px;fill:#8b847d}
+    .chartGrid{stroke:#ece6de;stroke-width:1}
+    .chartFrame{stroke:#ded7cf;stroke-width:1;fill:none}
+    .chartDot{stroke:#fff;stroke-width:2}
+    .seriesLabel{font-size:11px;font-weight:700}
+
+    .statStrip{
+      display:grid;
+      grid-template-columns:repeat(auto-fit,minmax(120px,1fr));
+      gap:10px;
+      margin-top:10px;
+    }
+
+    .tinyCard{
+      border:1px solid var(--line);
+      border-radius:14px;
+      padding:10px 12px;
+      background:#fbfaf7;
+    }
+
+    .tinyCard b{display:block;font-size:16px}
+    .tinyCard span{display:block;color:var(--muted);font-size:12px}
+
+    @media(max-width:880px){
+      .hero{grid-template-columns:1fr}
+      .top{padding:0 18px}
+      .wrap{padding:24px 14px}
+      .drop{padding:24px}
+      th,td{padding:10px}
+      .qrow{grid-template-columns:1fr}
+      .sectionBody{padding:0 12px 12px}
+    }
   </style>
 </head>
+
 <body>
-<header class="top"><div class="brand"><div class="logo">▰</div>Wyz</div><div class="pill">Hybrid parser · Claude insight</div></header>
+<header class="top">
+  <div class="brand"><div class="logo">▰</div>Wyz</div>
+  <div class="pill">Generic parser · user-controlled savings</div>
+</header>
+
 <main class="wrap">
   <section class="hero">
     <div class="card upload">
       <h1>Upload your statements</h1>
-      <p>PDF or CSV — credit cards, bank accounts, and payslips. Wyz extracts transactions locally where possible, then uses AI only where it adds value.</p>
-      <input id="fileInput" type="file" multiple accept=".pdf,.csv,.txt,.jpg,.jpeg,.png" hidden />
+      <p>PDF or CSV — credit cards, bank accounts, and payslips. Wyz extracts transactions, keeps categorisation generic, and lets you move selected rows into savings.</p>
+
+      <input id="fileInput" type="file" multiple accept=".pdf,.csv,.txt" hidden />
+
       <div id="drop" class="drop">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 16V4"/><path d="m7 9 5-5 5 5"/><path d="M5 16v2a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-2"/></svg>
-        <strong>Drop files or tap to browse</strong><span>Upload one or many files at once</span>
-        <div class="chips"><div class="chip">PDF</div><div class="chip">CSV</div><div class="chip">TXT</div></div>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+          <path d="M12 16V4"/>
+          <path d="m7 9 5-5 5 5"/>
+          <path d="M5 16v2a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-2"/>
+        </svg>
+        <strong>Drop files or tap to browse</strong>
+        <span>Upload one or many files at once</span>
+        <div class="chips">
+          <div class="chip">PDF</div>
+          <div class="chip">CSV</div>
+          <div class="chip">TXT</div>
+        </div>
       </div>
+
       <div id="files" class="files"></div>
+
       <button id="analyzeBtn" class="primary" disabled>Analyse files</button>
-      <div id="message" class="msg">Ready. Upload your training set and run analysis.</div>
+
+      <div id="message" class="msg">Ready. Upload your statements and run analysis.</div>
     </div>
+
     <div class="card side">
       <h2>Processing status</h2>
       <div class="status">
         <div id="s1" class="step"><div class="dot"></div>Reading file text with layout preservation</div>
-        <div id="s2" class="step"><div class="dot"></div>Applying deterministic statement parsers</div>
-        <div id="s3" class="step"><div class="dot"></div>Categorising transactions locally</div>
+        <div id="s2" class="step"><div class="dot"></div>Applying generic statement parsers</div>
+        <div id="s3" class="step"><div class="dot"></div>Assigning CR to income and DR to expenses</div>
         <div id="s4" class="step"><div class="dot"></div>Building dashboard</div>
       </div>
-      <div class="msg"><b>Timeout fix:</b> extraction no longer depends on one huge Claude JSON response. Claude is only used for optional insight or unknown-format fallback.</div>
+
+      <div class="msg">
+        <b>Review mode:</b> Search for items such as insurance, transfers, or investments, select visible rows, and move them to Savings when needed.
+      </div>
     </div>
   </section>
 
   <section id="dashboard" class="dashboard">
-    <div class="grid">
-      <div class="card metric"><span>Income</span><strong id="mIncome">AED 0</strong></div>
-      <div class="card metric"><span>Expenses</span><strong id="mExpenses">AED 0</strong></div>
-      <div class="card metric"><span>Savings & investments</span><strong id="mSavings">AED 0</strong></div>
-      <div class="card metric"><span>Loan/card payments</span><strong id="mLoans">AED 0</strong></div>
-    </div>
-    <div id="insight" class="insight" style="display:none"><h3 id="insightHeadline"></h3><p id="insightDetail"></p></div>
-    <div class="tools">
-      <div style="display:flex;gap:10px;flex-wrap:wrap"><input id="search" placeholder="Search merchant..."/><select id="catFilter"><option value="">All categories</option><option>income</option><option>expenses</option><option>savings_investments</option><option>loans</option></select></div>
-      <div style="display:flex;gap:10px"><button id="downloadCsv">Download CSV</button><button id="clearBtn">Clear</button></div>
-    </div>
-    <div class="tableWrap"><table><thead><tr><th>#</th><th>Date</th><th>Direction</th><th class="merchant">Merchant / description</th><th>Amount</th><th>Category</th><th>Type</th><th>File</th></tr></thead><tbody id="tbody"></tbody></table></div>
+    <details class="card section" open>
+      <summary>
+        <span class="summaryLeft">Summary cards</span>
+        <span class="chev">⌃</span>
+      </summary>
+
+      <div class="sectionBody">
+        <div class="grid">
+          <div class="card metric">
+            <span>Income</span>
+            <strong id="mIncome">AED 0</strong>
+            <small>All CR rows unless manually moved</small>
+          </div>
+
+          <div class="card metric">
+            <span>Expenses</span>
+            <strong id="mExpenses">AED 0</strong>
+            <small>All DR rows unless manually moved</small>
+          </div>
+
+          <div class="card metric">
+            <span>Savings</span>
+            <strong id="mSavings">AED 0</strong>
+            <small>User-selected rows moved from expenses/income</small>
+          </div>
+
+          <div class="card metric">
+            <span>Net P/L</span>
+            <strong id="mPL">AED 0</strong>
+            <small>Income − expenses − savings</small>
+          </div>
+        </div>
+      </div>
+    </details>
+
+    <details id="trendPanel" class="card section" open>
+      <summary>
+        <span class="summaryLeft">Monthly overview <span class="summaryMeta">Income · Expenses · Savings · P/L</span></span>
+        <span class="chev">⌃</span>
+      </summary>
+
+      <div class="sectionBody">
+        <p class="chartNote">
+          Compact monthly trend view. <b>P/L</b> is calculated as <b>Income − Expenses − Savings</b>. Use search and “Move selected to Savings” to correct investment/savings rows.
+        </p>
+
+        <div class="chartWrap">
+          <div class="legend">
+            <span><i style="background:#0d8a53"></i>Income</span>
+            <span><i style="background:#c0392b"></i>Expenses</span>
+            <span><i style="background:#7d4cff"></i>Savings</span>
+            <span><i style="background:#1f6fff"></i>P/L</span>
+          </div>
+
+          <div id="trendStats" class="statStrip"></div>
+          <div id="trendChart"></div>
+        </div>
+      </div>
+    </details>
+
+    <details id="insightPanel" class="card section" open style="display:none">
+      <summary>
+        <span class="summaryLeft">Insights</span>
+        <span class="chev">⌃</span>
+      </summary>
+
+      <div class="sectionBody">
+        <div id="insight" class="insight">
+          <h3 id="insightHeadline"></h3>
+          <p id="insightDetail"></p>
+        </div>
+      </div>
+    </details>
+
+    <details id="qualityPanel" class="card section" open style="display:none">
+      <summary>
+        <span class="summaryLeft">Parse quality report</span>
+        <span class="chev">⌃</span>
+      </summary>
+
+      <div class="sectionBody qualityInner">
+        <div id="qualityRows"></div>
+      </div>
+    </details>
+
+    <details class="card section" open>
+      <summary>
+        <span class="summaryLeft">Transactions listing <span class="summaryMeta">Search, select and move</span></span>
+        <span class="chev">⌃</span>
+      </summary>
+
+      <div class="sectionBody">
+        <div class="tools">
+          <div style="display:flex;gap:10px;flex-wrap:wrap">
+            <input id="search" placeholder="Search merchant / description..." />
+
+            <select id="catFilter">
+              <option value="">All categories</option>
+              <option value="income">Income</option>
+              <option value="expenses">Expenses</option>
+              <option value="savings_investments">Savings</option>
+            </select>
+          </div>
+
+          <div style="display:flex;gap:10px;flex-wrap:wrap">
+            <button id="moveIncome" class="ghostBtn smallBtn">Move selected to Income</button>
+            <button id="moveExpense" class="ghostBtn smallBtn">Move selected to Expenses</button>
+            <button id="moveSavings" class="ghostBtn smallBtn">Move selected to Savings</button>
+            <button id="downloadCsv" class="smallBtn">Download CSV</button>
+            <button id="clearBtn" class="ghostBtn smallBtn">Clear</button>
+          </div>
+        </div>
+
+        <div class="tableWrap">
+          <table>
+            <thead>
+              <tr>
+                <th><input id="selectVisible" type="checkbox" /></th>
+                <th>#</th>
+                <th>Date</th>
+                <th>Direction</th>
+                <th class="merchant">Merchant / description</th>
+                <th>Amount <span id="visibleTotal" class="mini"></span></th>
+                <th>Category</th>
+                <th>File</th>
+              </tr>
+            </thead>
+
+            <tbody id="tbody"></tbody>
+          </table>
+        </div>
+      </div>
+    </details>
   </section>
 </main>
+
 <script>
 const API_URL = '/api/analyze';
-const state = { files: [], transactions: [], fileStats: [] };
-const el = id => document.getElementById(id);
-const money = n => 'AED ' + (Number(n)||0).toLocaleString(undefined,{maximumFractionDigits:2});
-const setStep = n => ['s1','s2','s3','s4'].forEach((id,i)=>el(id).classList.toggle('on',i<n));
-const setMsg = (html, cls='') => { el('message').className = 'msg ' + cls; el('message').innerHTML = html; };
+const STORAGE_KEY = 'wyz.saved.generic.v1';
 
-pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+const state = {
+  files: [],
+  transactions: [],
+  fileStats: []
+};
+
+const el = id => document.getElementById(id);
+
+const money = n => 'AED ' + (Number(n) || 0).toLocaleString(undefined, {
+  maximumFractionDigits: 2
+});
+
+const setStep = n => {
+  ['s1','s2','s3','s4'].forEach((id, i) => {
+    el(id).classList.toggle('on', i < n);
+  });
+};
+
+const setMsg = (html, cls = '') => {
+  el('message').className = 'msg ' + cls;
+  el('message').innerHTML = html;
+};
+
+pdfjsLib.GlobalWorkerOptions.workerSrc =
+  'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
 
 el('drop').onclick = () => el('fileInput').click();
 el('fileInput').onchange = e => addFiles([...e.target.files]);
-['dragenter','dragover'].forEach(ev => el('drop').addEventListener(ev, e => {e.preventDefault(); el('drop').style.borderColor='#111';}));
-['dragleave','drop'].forEach(ev => el('drop').addEventListener(ev, e => {e.preventDefault(); el('drop').style.borderColor='';}));
+
+['dragenter','dragover'].forEach(ev => {
+  el('drop').addEventListener(ev, e => {
+    e.preventDefault();
+    el('drop').style.borderColor = '#111';
+  });
+});
+
+['dragleave','drop'].forEach(ev => {
+  el('drop').addEventListener(ev, e => {
+    e.preventDefault();
+    el('drop').style.borderColor = '';
+  });
+});
+
 el('drop').addEventListener('drop', e => addFiles([...e.dataTransfer.files]));
 
-function addFiles(files){
-  for(const f of files){ if(!state.files.some(x=>x.name===f.name && x.size===f.size)) state.files.push(f); }
+window.addEventListener('resize', () => {
+  if (state.transactions.length) renderTrendChart();
+});
+
+function addFiles(files) {
+  for (const f of files) {
+    if (!state.files.some(x => x.name === f.name && x.size === f.size)) {
+      state.files.push(f);
+    }
+  }
+
   renderFiles();
 }
-function renderFiles(){
-  el('files').innerHTML = state.files.map((f,i)=>`<div class="file"><div><b>${escapeHtml(f.name)}</b><br><small>${Math.round(f.size/1024)} KB</small></div><button onclick="removeFile(${i})" style="padding:8px 11px">×</button></div>`).join('');
+
+function renderFiles() {
+  el('files').innerHTML = state.files.map((f, i) => `
+    <div class="file">
+      <div>
+        <b>${escapeHtml(f.name)}</b><br>
+        <small>${Math.round(f.size / 1024)} KB</small>
+      </div>
+      <button onclick="removeFile(${i})">Remove</button>
+    </div>
+  `).join('');
+
   el('analyzeBtn').disabled = !state.files.length;
 }
-window.removeFile = i => { state.files.splice(i,1); renderFiles(); };
 
-async function extractPdfText(file){
+window.removeFile = i => {
+  state.files.splice(i, 1);
+  renderFiles();
+};
+
+async function extractPdfText(file) {
   const ab = await file.arrayBuffer();
-  const pdf = await pdfjsLib.getDocument({data:new Uint8Array(ab), useSystemFonts:true}).promise;
+
+  const pdf = await pdfjsLib.getDocument({
+    data: new Uint8Array(ab)
+  }).promise;
+
   let text = '';
-  for(let p=1;p<=pdf.numPages;p++){
+
+  for (let p = 1; p <= pdf.numPages; p++) {
     const page = await pdf.getPage(p);
-    const content = await page.getTextContent({normalizeWhitespace:true, disableCombineTextItems:false});
-    const rows = new Map();
-    for(const item of content.items){
-      const str = String(item.str||'').trim();
-      if(!str) continue;
+    const content = await page.getTextContent();
+    const rows = {};
+
+    for (const item of content.items) {
+      const str = (item.str || '').trim();
+      if (!str) continue;
+
+      const y = Math.round(item.transform[5]);
       const x = item.transform[4];
-      const y = Math.round(item.transform[5]/3)*3;
-      if(!rows.has(y)) rows.set(y, []);
-      rows.get(y).push({x,str});
+
+      if (!rows[y]) rows[y] = [];
+      rows[y].push({ x, str });
     }
-    const lines = [...rows.entries()]
-      .sort((a,b)=>b[0]-a[0])
-      .map(([y,items]) => items.sort((a,b)=>a.x-b.x).map(i=>i.str).join(' '))
-      .filter(Boolean);
-    text += `\n--- PAGE ${p} ---\n` + lines.join('\n') + '\n';
+
+    const pageLines = Object.keys(rows)
+      .map(Number)
+      .sort((a,b) => b - a)
+      .map(y => rows[y].sort((a,b) => a.x - b.x).map(i => i.str).join(' '))
+      .join('\n');
+
+    text += pageLines + '\n';
   }
+
   return text.trim();
 }
 
-async function extractCsvText(file){
-  const raw = await file.text();
-  return raw.split(/\r?\n/).map(l => l.split(',').map(x=>x.trim()).join(' ')).join('\n');
-}
-async function extractText(file){
+async function extractText(file) {
   const name = file.name.toLowerCase();
-  if(name.endsWith('.pdf')) return extractPdfText(file);
-  if(name.endsWith('.csv')) return extractCsvText(file);
-  if(name.endsWith('.txt')) return file.text();
-  throw new Error('Images need OCR before upload. Convert this image to PDF text or CSV first.');
+
+  if (name.endsWith('.pdf')) return extractPdfText(file);
+  if (name.endsWith('.csv')) return file.text();
+  if (name.endsWith('.txt')) return file.text();
+
+  throw new Error('Unsupported file. Please upload PDF, CSV, or TXT.');
 }
 
-async function postJson(payload){
-  const res = await fetch(API_URL,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
-  const data = await res.json().catch(()=>({error:'bad_json',message:'Server returned non-JSON response'}));
-  if(!res.ok) throw new Error(data.message || data.error || `HTTP ${res.status}`);
+async function postJson(payload) {
+  const res = await fetch(API_URL, {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(payload)
+  });
+
+  const data = await res.json().catch(() => ({
+    error: 'bad_json',
+    message: 'Server returned non-JSON response'
+  }));
+
+  if (!res.ok) {
+    throw new Error(data.message || data.error || `HTTP ${res.status}`);
+  }
+
   return data;
 }
 
 el('analyzeBtn').onclick = async () => {
-  state.transactions = []; state.fileStats = [];
-  el('dashboard').style.display = 'none'; setStep(0);
   el('analyzeBtn').disabled = true;
+  setStep(0);
   setMsg('Starting analysis...');
+
   const failed = [];
-  let fileIdx = 0;
-  for(const file of state.files){
-    try{
-      setStep(1); setMsg(`Reading <b>${escapeHtml(file.name)}</b>...`);
+  const processed = [];
+  const skipped = [];
+
+  let fileIdx = state.fileStats.length + 1;
+  const already = new Set(state.fileStats.map(x => x.file));
+
+  for (const file of state.files) {
+    if (already.has(file.name)) {
+      skipped.push({
+        file: file.name,
+        reason: 'Already processed in saved dashboard. Clear first to reprocess this same file.'
+      });
+      continue;
+    }
+
+    try {
+      setStep(1);
+      setMsg(`Reading <b>${escapeHtml(file.name)}</b>...`);
+
       const text = await extractText(file);
-      console.log('TEXT SAMPLE', file.name, text.slice(0,2000));
-      setStep(2); setMsg(`Parsing <b>${escapeHtml(file.name)}</b>...`);
-      const data = await postJson({action:'extract', filename:file.name, text, allow_ai_fallback:false});
-      fileIdx++;
-      const txns = (data.transactions||[]).map(t => ({...t, _file:file.name, _fileIdx:fileIdx}));
+
+      setStep(2);
+      setMsg(`Parsing <b>${escapeHtml(file.name)}</b>...`);
+
+      const data = await postJson({
+        action: 'extract',
+        filename: file.name,
+        text
+      });
+
+      const txns = (data.transactions || []).map(t => ({
+        ...t,
+        _file: file.name,
+        _fileIdx: fileIdx,
+        _fileSize: file.size
+      }));
+
       state.transactions.push(...txns);
-      state.fileStats.push({file:file.name, parser:data.parser, count:data.count, warning:data.warning});
-      if(data.warning && !txns.length) failed.push({file:file.name, reason:data.warning});
+
+      const report = data.parse_report || {
+        status: data.warning ? 'warning' : (txns.length ? 'ok' : 'failed'),
+        confidence: txns.length ? 0.8 : 0,
+        transactions_extracted: txns.length,
+        warnings: data.warning ? [data.warning] : []
+      };
+
+      state.fileStats.push({
+        file: file.name,
+        parser: data.parser,
+        count: data.count,
+        warning: data.warning,
+        parse_report: report
+      });
+
+      if (report.status !== 'ok') {
+        failed.push({
+          file: file.name,
+          reason: (report.warnings || [])[0] || data.warning || 'Needs review'
+        });
+      }
+
+      processed.push(file.name);
+      fileIdx++;
       setStep(3);
-    }catch(err){
-      console.error(err); failed.push({file:file.name, reason:err.message});
+    } catch (err) {
+      console.error(err);
+      failed.push({
+        file: file.name,
+        reason: err.message
+      });
     }
   }
-  state.transactions.forEach((t,i)=>t._globalSeq=i+1);
+
+  state.transactions.forEach((t, i) => {
+    t._globalSeq = i + 1;
+  });
+
+  state.files = [];
+  renderFiles();
   setStep(4);
-  if(!state.transactions.length){
-    setMsg(`<b>Something went wrong</b><br>No transactions could be extracted.<br><br>${failed.map(f=>`• ${escapeHtml(f.file)}: ${escapeHtml(f.reason)}`).join('<br>')}`, 'err');
+
+  if (!state.transactions.length) {
+    const lines = failed.concat(skipped)
+      .map(f => `• ${escapeHtml(f.file)}: ${escapeHtml(f.reason)}`)
+      .join('<br>');
+
+    setMsg(`<b>Something went wrong</b><br>No transactions could be extracted.<br><br>${lines}`, 'err');
     el('analyzeBtn').disabled = false;
     return;
   }
+
   renderDashboard();
-  const failHtml = failed.length ? `<br><br><b>Files needing attention:</b><br>${failed.map(f=>`• ${escapeHtml(f.file)}: ${escapeHtml(f.reason)}`).join('<br>')}` : '';
-  setMsg(`<b>Done.</b> Extracted ${state.transactions.length} transactions from ${state.fileStats.length} files.${failHtml}`, failed.length?'':'ok');
+  saveState();
+
+  const attention = failed.length
+    ? `<br><br><b>Files needing attention:</b><br>${failed.map(f => `• ${escapeHtml(f.file)}: ${escapeHtml(f.reason)}`).join('<br>')}`
+    : '';
+
+  const skippedHtml = skipped.length
+    ? `<br><br><b>Skipped:</b><br>${skipped.map(f => `• ${escapeHtml(f.file)}: ${escapeHtml(f.reason)}`).join('<br>')}`
+    : '';
+
+  const added = processed.length ? `Added ${processed.length} file(s). ` : '';
+
+  setMsg(
+    `<b>Done.</b> ${added}Dashboard now has ${state.transactions.length} transactions from ${state.fileStats.length} files.${attention}${skippedHtml}`,
+    failed.length ? '' : 'ok'
+  );
+
   el('analyzeBtn').disabled = false;
+
   requestInsight().catch(console.warn);
 };
 
-function summarize(txns){
-  const totals={income:0,expenses:0,savings_investments:0,loans:0};
-  for(const t of txns){ if(totals[t.cat]==null) totals.expenses+=t.amount; else totals[t.cat]+=t.amount; }
+function labelCategory(cat) {
+  if (cat === 'income') return 'Income';
+  if (cat === 'savings_investments') return 'Savings';
+  return 'Expenses';
+}
+
+function summarize(txns) {
+  const totals = {
+    income: 0,
+    expenses: 0,
+    savings_investments: 0
+  };
+
+  for (const t of txns) {
+    const amt = Number(t.amount) || 0;
+
+    if (t.cat === 'income') totals.income += amt;
+    else if (t.cat === 'savings_investments') totals.savings_investments += amt;
+    else totals.expenses += amt;
+  }
+
+  totals.pl = totals.income - totals.expenses - totals.savings_investments;
+
   return totals;
 }
-function renderDashboard(){
+
+function monthLabel(yyyyMm) {
+  const [y, m] = String(yyyyMm).split('-');
+  const d = new Date(Number(y), Number(m) - 1, 1);
+
+  return d.toLocaleDateString(undefined, {
+    month: 'short',
+    year: '2-digit'
+  });
+}
+
+function monthlySeries(txns) {
+  const months = [...new Set(
+    txns
+      .map(t => String(t.date || '').slice(0, 7))
+      .filter(x => /^\d{4}-\d{2}$/.test(x))
+  )].sort();
+
+  const map = new Map(months.map(m => [
+    m,
+    {
+      month: m,
+      label: monthLabel(m),
+      income: 0,
+      expenses: 0,
+      savings: 0,
+      pl: 0
+    }
+  ]));
+
+  for (const t of txns) {
+    const key = String(t.date || '').slice(0, 7);
+    if (!map.has(key)) continue;
+
+    const row = map.get(key);
+    const amt = Number(t.amount) || 0;
+
+    if (t.cat === 'income') row.income += amt;
+    else if (t.cat === 'savings_investments') row.savings += amt;
+    else row.expenses += amt;
+  }
+
+  return [...map.values()].map(r => ({
+    ...r,
+    pl: r.income - r.expenses - r.savings
+  }));
+}
+
+function renderDashboard() {
   const totals = summarize(state.transactions);
+
   el('mIncome').textContent = money(totals.income);
   el('mExpenses').textContent = money(totals.expenses);
   el('mSavings').textContent = money(totals.savings_investments);
-  el('mLoans').textContent = money(totals.loans);
+  el('mPL').textContent = money(totals.pl);
+
   el('dashboard').style.display = 'block';
+
   renderTable();
+  renderQuality();
+  renderTrendChart();
 }
-function renderTable(){
+
+function renderTrendChart() {
+  const series = monthlySeries(state.transactions);
+  const holder = el('trendChart');
+  const stats = el('trendStats');
+
+  if (!series.length) {
+    holder.innerHTML = '<div class="chartEmpty">No dated transactions available for a monthly chart yet.</div>';
+    stats.innerHTML = '';
+    return;
+  }
+
+  const maxVal = Math.max(1, ...series.flatMap(r => [
+    r.income,
+    r.expenses,
+    r.savings,
+    Math.max(0, r.pl)
+  ]));
+
+  const minVal = Math.min(0, ...series.map(r => r.pl));
+  const pad = (maxVal - minVal) * 0.12 || 50;
+
+  const topVal = maxVal + pad;
+  const bottomVal = minVal - pad;
+
+  const width = 860;
+  const height = 290;
+  const left = 58;
+  const right = 18;
+  const top = 20;
+  const bottom = 36;
+
+  const cw = width - left - right;
+  const ch = height - top - bottom;
+
+  const xAt = i => left + (series.length === 1 ? cw / 2 : (i * cw / (series.length - 1)));
+  const yAt = v => top + (topVal - v) * ch / Math.max(1, (topVal - bottomVal));
+
+  const mkPath = key => series
+    .map((r, i) => `${i === 0 ? 'M' : 'L'} ${xAt(i).toFixed(1)} ${yAt(r[key]).toFixed(1)}`)
+    .join(' ');
+
+  const gridVals = Array.from({length: 5}, (_, i) => bottomVal + (i * (topVal - bottomVal) / 4));
+
+  const colors = {
+    income: '#0d8a53',
+    expenses: '#c0392b',
+    savings: '#7d4cff',
+    pl: '#1f6fff'
+  };
+
+  const totals = summarize(state.transactions);
+
+  stats.innerHTML = `
+    <div class="tinyCard"><span>Months covered</span><b>${series.length}</b></div>
+    <div class="tinyCard"><span>Average monthly income</span><b>${money(totals.income / series.length)}</b></div>
+    <div class="tinyCard"><span>Average monthly expenses</span><b>${money(totals.expenses / series.length)}</b></div>
+    <div class="tinyCard"><span>Average monthly savings</span><b>${money(totals.savings_investments / series.length)}</b></div>
+    <div class="tinyCard"><span>Average monthly P/L</span><b>${money(totals.pl / series.length)}</b></div>
+  `;
+
+  holder.innerHTML = `
+    <svg class="chartSvg" viewBox="0 0 ${width} ${height}" preserveAspectRatio="xMidYMid meet" aria-label="Monthly finance trend chart">
+      <rect x="0" y="0" width="${width}" height="${height}" fill="#fff" rx="16" ry="16"></rect>
+      <rect class="chartFrame" x="${left}" y="${top}" width="${cw}" height="${ch}" rx="12" ry="12"></rect>
+
+      ${gridVals.map(v => `
+        <g>
+          <line class="chartGrid" x1="${left}" x2="${left + cw}" y1="${yAt(v)}" y2="${yAt(v)}"></line>
+          <text class="chartAxis" x="${left - 8}" y="${yAt(v) + 4}" text-anchor="end">${Math.round(v).toLocaleString()}</text>
+        </g>
+      `).join('')}
+
+      ${series.map((r, i) => `
+        <text class="chartAxis" x="${xAt(i)}" y="${height - 10}" text-anchor="middle">${escapeHtml(r.label)}</text>
+      `).join('')}
+
+      ${yAt(0) >= top && yAt(0) <= top + ch
+        ? `<line x1="${left}" x2="${left + cw}" y1="${yAt(0)}" y2="${yAt(0)}" stroke="#bdb5ae" stroke-dasharray="4 4"></line>`
+        : ''}
+
+      <path d="${mkPath('income')}" fill="none" stroke="${colors.income}" stroke-width="3"></path>
+      <path d="${mkPath('expenses')}" fill="none" stroke="${colors.expenses}" stroke-width="3"></path>
+      <path d="${mkPath('savings')}" fill="none" stroke="${colors.savings}" stroke-width="3"></path>
+      <path d="${mkPath('pl')}" fill="none" stroke="${colors.pl}" stroke-width="3.5"></path>
+
+      ${['income','expenses','savings','pl'].map(key =>
+        series.map((r, i) => `
+          <circle class="chartDot" cx="${xAt(i)}" cy="${yAt(r[key])}" r="4" fill="${colors[key]}">
+            <title>${r.label} · ${key.toUpperCase()} · ${money(r[key])}</title>
+          </circle>
+        `).join('')
+      ).join('')}
+
+      <text class="seriesLabel" x="${left + 6}" y="${top + 14}" fill="${colors.income}">Income</text>
+      <text class="seriesLabel" x="${left + 70}" y="${top + 14}" fill="${colors.expenses}">Expenses</text>
+      <text class="seriesLabel" x="${left + 155}" y="${top + 14}" fill="${colors.savings}">Savings</text>
+      <text class="seriesLabel" x="${left + 230}" y="${top + 14}" fill="${colors.pl}">P/L</text>
+    </svg>
+  `;
+}
+
+function renderQuality() {
+  const rows = state.fileStats || [];
+
+  if (!rows.length) {
+    el('qualityPanel').style.display = 'none';
+    return;
+  }
+
+  el('qualityPanel').style.display = 'block';
+
+  el('qualityRows').innerHTML = rows.map(x => {
+    const r = x.parse_report || {};
+    const status = r.status || (x.warning ? 'warning' : 'ok');
+    const cls = status === 'ok' ? 'qok' : (status === 'failed' ? 'qfail' : 'qwarn');
+    const conf = r.confidence == null ? '' : Math.round(Number(r.confidence) * 100) + '%';
+    const cand = r.candidate_date_rows ?? 'n/a';
+    const ext = r.transactions_extracted ?? x.count ?? 0;
+    const warn = (r.warnings && r.warnings[0]) || x.warning || '';
+
+    return `
+      <div class="qrow">
+        <div><b>${escapeHtml(x.file)}</b><br><span class="mini">${escapeHtml(x.parser || r.parser || 'unknown')}</span></div>
+        <div class="${cls}">${escapeHtml(status)}</div>
+        <div>${escapeHtml(conf)}</div>
+        <div>${ext}/${cand} rows</div>
+        <div class="mini">${escapeHtml(warn)}</div>
+      </div>
+    `;
+  }).join('');
+}
+
+function getVisibleRows() {
   const q = el('search').value.toLowerCase();
   const c = el('catFilter').value;
-  const rows = state.transactions.filter(t => (!q || String(t.merchant).toLowerCase().includes(q)) && (!c || t.cat===c));
-  el('tbody').innerHTML = rows.map(t => `<tr>
-    <td>${t._globalSeq}</td><td>${escapeHtml(t.date||'')}</td><td><span class="tag ${t.direction}">${t.direction}</span></td>
-    <td class="merchant">${escapeHtml(t.merchant||'')}</td><td>${money(t.amount)}</td>
-    <td><span class="tag">${escapeHtml(t.cat||'')}</span></td><td>${escapeHtml(t.type||'')}</td><td class="mini">${escapeHtml(t._file||'')}</td>
-  </tr>`).join('');
+
+  return state.transactions.filter(t =>
+    (!q || String(t.merchant).toLowerCase().includes(q)) &&
+    (!c || t.cat === c)
+  );
 }
-el('search').oninput = renderTable; el('catFilter').onchange = renderTable;
-el('clearBtn').onclick = () => { state.transactions=[]; state.files=[]; state.fileStats=[]; renderFiles(); el('dashboard').style.display='none'; setStep(0); setMsg('Cleared. Upload files to start again.'); };
-el('downloadCsv').onclick = () => {
-  const cols = ['seq','date','merchant','amount','currency','direction','cat','sub','type','freq','file','parser'];
-  const lines = [cols.join(',')].concat(state.transactions.map(t => cols.map(k => csvCell(k==='seq'?t._globalSeq:k==='file'?t._file:t[k])).join(',')));
-  const blob = new Blob([lines.join('\n')],{type:'text/csv'});
-  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'wyz_transactions.csv'; a.click(); URL.revokeObjectURL(a.href);
-};
-async function requestInsight(){
-  const summary = summarize(state.transactions);
-  const data = await postJson({action:'insight', summary:{totals:summary, top_merchants:topMerchants(), months:new Set(state.transactions.map(t=>String(t.date).slice(0,7))).size}});
-  if(data.headline){ el('insightHeadline').textContent=data.headline; el('insightDetail').textContent=data.detail||''; el('insight').style.display='block'; }
+
+function renderTable() {
+  const rows = getVisibleRows();
+
+  const dr = rows
+    .filter(t => t.direction === 'DR')
+    .reduce((a, t) => a + (Number(t.amount) || 0), 0);
+
+  const cr = rows
+    .filter(t => t.direction === 'CR')
+    .reduce((a, t) => a + (Number(t.amount) || 0), 0);
+
+  const savings = rows
+    .filter(t => t.cat === 'savings_investments')
+    .reduce((a, t) => a + (Number(t.amount) || 0), 0);
+
+  el('visibleTotal').textContent = rows.length
+    ? ` · visible DR ${money(dr)}${cr ? `, CR ${money(cr)}` : ''}${savings ? `, Savings ${money(savings)}` : ''} · ${rows.length} rows`
+    : '';
+
+  el('tbody').innerHTML = rows.map(t => `
+    <tr>
+      <td><input class="rowCheck" type="checkbox" data-seq="${t._globalSeq}" /></td>
+      <td>${t._globalSeq}</td>
+      <td>${escapeHtml(t.date || '')}</td>
+      <td><span class="tag ${t.direction}">${t.direction}</span></td>
+      <td class="merchant">${escapeHtml(t.merchant || '')}</td>
+      <td>${money(t.amount)}</td>
+      <td><span class="tag ${t.cat === 'savings_investments' ? 'savings' : ''}">${escapeHtml(labelCategory(t.cat))}</span></td>
+      <td class="mini">${escapeHtml(t._file || '')}</td>
+    </tr>
+  `).join('');
+
+  el('selectVisible').checked = false;
 }
-function topMerchants(){
-  const m = new Map();
-  for(const t of state.transactions){
-    if(t.direction!=='DR' || t.cat==='loans' || t.cat==='savings_investments') continue;
-    const x = m.get(t.merchant)||{merchant:t.merchant,total:0,count:0,category:t.type}; x.total+=t.amount; x.count++; m.set(t.merchant,x);
+
+function getSelectedSeqs() {
+  return [...document.querySelectorAll('.rowCheck:checked')]
+    .map(x => Number(x.dataset.seq))
+    .filter(Boolean);
+}
+
+function moveSelectedTo(cat) {
+  const selected = new Set(getSelectedSeqs());
+
+  if (!selected.size) {
+    setMsg('Select one or more rows first, or use Select visible after searching.', 'err');
+    return;
   }
-  return [...m.values()].sort((a,b)=>b.total-a.total).slice(0,15).map(x=>({...x,total:Math.round(x.total*100)/100}));
+
+  for (const t of state.transactions) {
+    if (selected.has(Number(t._globalSeq))) {
+      t.cat = cat;
+      t.sub = 'user_reviewed';
+      t.type = cat === 'income'
+        ? 'credit'
+        : cat === 'savings_investments'
+          ? 'saving_or_investment'
+          : 'debit';
+
+      t.user_classified = true;
+    }
+  }
+
+  saveState();
+  renderDashboard();
+
+  setMsg(`<b>Updated.</b> Moved ${selected.size} selected transaction(s) to ${labelCategory(cat)}.`, 'ok');
 }
-function csvCell(v){ const s = String(v ?? ''); return /[",\n]/.test(s) ? '"'+s.replace(/"/g,'""')+'"' : s; }
-function escapeHtml(s){ return String(s??'').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+
+el('selectVisible').onchange = e => {
+  const checked = e.target.checked;
+  document.querySelectorAll('.rowCheck').forEach(x => {
+    x.checked = checked;
+  });
+};
+
+el('moveIncome').onclick = () => moveSelectedTo('income');
+el('moveExpense').onclick = () => moveSelectedTo('expenses');
+el('moveSavings').onclick = () => moveSelectedTo('savings_investments');
+
+el('search').oninput = renderTable;
+el('catFilter').onchange = renderTable;
+
+el('clearBtn').onclick = () => {
+  state.transactions = [];
+  state.files = [];
+  state.fileStats = [];
+
+  localStorage.removeItem(STORAGE_KEY);
+
+  renderFiles();
+
+  el('dashboard').style.display = 'none';
+  el('qualityPanel').style.display = 'none';
+  el('insightPanel').style.display = 'none';
+
+  setStep(0);
+  setMsg('Cleared. Upload files to start again.');
+};
+
+el('downloadCsv').onclick = () => {
+  const cols = [
+    'seq',
+    'date',
+    'merchant',
+    'amount',
+    'currency',
+    'direction',
+    'cat',
+    'sub',
+    'type',
+    'freq',
+    'file',
+    'parser',
+    'user_classified'
+  ];
+
+  const lines = [cols.join(',')].concat(
+    state.transactions.map(t =>
+      cols.map(k =>
+        csvCell(
+          k === 'seq'
+            ? t._globalSeq
+            : k === 'file'
+              ? t._file
+              : t[k]
+        )
+      ).join(',')
+    )
+  );
+
+  const blob = new Blob([lines.join('\n')], {
+    type: 'text/csv'
+  });
+
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'wyz_transactions.csv';
+  a.click();
+
+  URL.revokeObjectURL(a.href);
+};
+
+async function requestInsight() {
+  const summary = summarize(state.transactions);
+  const local = localInsights();
+
+  try {
+    const data = await postJson({
+      action: 'insight',
+      summary: {
+        totals: summary,
+        months: new Set(state.transactions.map(t => String(t.date).slice(0, 7))).size
+      }
+    });
+
+    el('insightHeadline').textContent = data.headline || 'Interesting money patterns';
+    el('insightDetail').innerHTML = `${escapeHtml(data.detail || '')}<ul>${local.map(x => `<li>${escapeHtml(x)}</li>`).join('')}</ul>`;
+  } catch (e) {
+    el('insightHeadline').textContent = 'Interesting money patterns';
+    el('insightDetail').innerHTML = `<ul>${local.map(x => `<li>${escapeHtml(x)}</li>`).join('')}</ul>`;
+  }
+
+  el('insightPanel').style.display = 'block';
+}
+
+function localInsights() {
+  const out = [];
+  const totals = summarize(state.transactions);
+  const monthly = monthlySeries(state.transactions);
+
+  out.push(`Current P/L is ${money(totals.pl)} after income, expenses, and user-classified savings.`);
+
+  const best = [...monthly].sort((a,b) => b.pl - a.pl)[0];
+  const worst = [...monthly].sort((a,b) => a.pl - b.pl)[0];
+
+  if (best) out.push(`Best month by P/L: ${best.label} at ${money(best.pl)}.`);
+  if (worst && (!best || worst.month !== best.month)) out.push(`Weakest month by P/L: ${worst.label} at ${money(worst.pl)}.`);
+
+  const savingsRows = state.transactions.filter(t => t.cat === 'savings_investments');
+
+  if (savingsRows.length) {
+    out.push(`${savingsRows.length} transaction(s) have been manually classified as Savings.`);
+  } else {
+    out.push(`Tip: Search for investment or savings transactions, select visible rows, and move them to Savings.`);
+  }
+
+  return out.slice(0, 5);
+}
+
+function saveState() {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({
+      transactions: state.transactions,
+      fileStats: state.fileStats,
+      savedAt: new Date().toISOString()
+    }));
+  } catch (e) {
+    console.warn('Save failed', e);
+  }
+}
+
+function restoreState() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return;
+
+    const saved = JSON.parse(raw);
+
+    if (!Array.isArray(saved.transactions) || !saved.transactions.length) return;
+
+    state.transactions = saved.transactions;
+    state.fileStats = saved.fileStats || [];
+
+    state.transactions.forEach((t, i) => {
+      t._globalSeq = i + 1;
+    });
+
+    renderDashboard();
+    requestInsight().catch(() => {});
+
+    setMsg(`<b>Restored saved dashboard.</b> ${state.transactions.length} transactions are available. Upload more files to append new data, or Clear to reset.`, 'ok');
+  } catch (e) {
+    console.warn('Restore failed', e);
+  }
+}
+
+function csvCell(v) {
+  const s = String(v ?? '');
+  return /[",\n]/.test(s)
+    ? '"' + s.replace(/"/g, '""') + '"'
+    : s;
+}
+
+function escapeHtml(s) {
+  return String(s ?? '').replace(/[&<>"]/g, c => ({
+    '&':'&amp;',
+    '<':'&lt;',
+    '>':'&gt;',
+    '"':'&quot;'
+  }[c]));
+}
+
+restoreState();
 </script>
 </body>
 </html>
