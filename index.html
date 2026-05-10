@@ -504,9 +504,7 @@
       </div>
 
       <div id="files" class="files"></div>
-
       <button id="analyzeBtn" class="primary" disabled>Analyse files</button>
-
       <div id="message" class="msg">Ready. Upload your statements and run analysis.</div>
     </div>
 
@@ -520,7 +518,7 @@
       </div>
 
       <div class="msg">
-        <b>Review mode:</b> Search for items such as investments, savings, self-transfers, or family transfers. Select visible rows and move them to Savings or Ignored.
+        <b>Review mode:</b> Search for savings, investment, self-transfer, or family-transfer rows. Select visible rows and move them to Savings or Ignored.
       </div>
     </div>
   </section>
@@ -672,7 +670,7 @@
 
 <script>
 const API_URL = '/api/analyze';
-const STORAGE_KEY = 'wyz.saved.generic.v2';
+const STORAGE_KEY = 'wyz.saved.generic.v3';
 
 const state = {
   files: [],
@@ -864,7 +862,7 @@ el('analyzeBtn').onclick = async () => {
       state.transactions.push(...txns);
 
       const report = data.parse_report || {
-        status: data.warning ? 'warning' : (txns.length ? 'ok' : 'failed'),
+        status: data.warning ? 'review' : (txns.length ? 'ok' : 'failed'),
         confidence: txns.length ? 0.8 : 0,
         transactions_extracted: txns.length,
         warnings: data.warning ? [data.warning] : []
@@ -919,7 +917,7 @@ el('analyzeBtn').onclick = async () => {
   saveState();
 
   const attention = failed.length
-    ? `<br><br><b>Files needing attention:</b><br>${failed.map(f => `• ${escapeHtml(f.file)}: ${escapeHtml(f.reason)}`).join('<br>')}`
+    ? `<br><br><b>Files needing attention / review:</b><br>${failed.map(f => `• ${escapeHtml(f.file)}: ${escapeHtml(f.reason)}`).join('<br>')}`
     : '';
 
   const skippedHtml = skipped.length
@@ -934,7 +932,7 @@ el('analyzeBtn').onclick = async () => {
   );
 
   el('analyzeBtn').disabled = false;
-  requestInsight().catch(console.warn);
+  requestInsight();
 };
 
 function labelCategory(cat) {
@@ -1144,16 +1142,20 @@ function renderQuality() {
 
   el('qualityRows').innerHTML = rows.map(x => {
     const r = x.parse_report || {};
-    const status = r.status || (x.warning ? 'warning' : 'ok');
+    const rawStatus = r.status || (x.warning ? 'review' : 'ok');
+    const status = rawStatus === 'warning' ? 'review' : rawStatus;
     const cls = status === 'ok' ? 'qok' : (status === 'failed' ? 'qfail' : 'qwarn');
     const conf = r.confidence == null ? '' : Math.round(Number(r.confidence) * 100) + '%';
     const cand = r.candidate_date_rows ?? 'n/a';
     const ext = r.transactions_extracted ?? x.count ?? 0;
-    const warn = (r.warnings && r.warnings[0]) || x.warning || '';
+    const warn = (r.warnings && r.warnings[0]) || x.warning || r.quality_note || '';
 
     return `
       <div class="qrow">
-        <div><b>${escapeHtml(x.file)}</b><br><span class="mini">${escapeHtml(x.parser || r.parser || 'unknown')}</span></div>
+        <div>
+          <b>${escapeHtml(x.file)}</b><br>
+          <span class="mini">${escapeHtml(x.parser || r.parser || 'unknown')}</span>
+        </div>
         <div class="${cls}">${escapeHtml(status)}</div>
         <div>${escapeHtml(conf)}</div>
         <div>${ext}/${cand} rows</div>
@@ -1331,26 +1333,11 @@ el('downloadCsv').onclick = () => {
   URL.revokeObjectURL(a.href);
 };
 
-async function requestInsight() {
-  const summary = summarize(state.transactions);
+function requestInsight() {
   const local = localInsights();
 
-  try {
-    const data = await postJson({
-      action: 'insight',
-      summary: {
-        totals: summary,
-        months: new Set(state.transactions.map(t => String(t.date).slice(0, 7))).size
-      }
-    });
-
-    el('insightHeadline').textContent = data.headline || 'Interesting money patterns';
-    el('insightDetail').innerHTML = `${escapeHtml(data.detail || '')}<ul>${local.map(x => `<li>${escapeHtml(x)}</li>`).join('')}</ul>`;
-  } catch (e) {
-    el('insightHeadline').textContent = 'Interesting money patterns';
-    el('insightDetail').innerHTML = `<ul>${local.map(x => `<li>${escapeHtml(x)}</li>`).join('')}</ul>`;
-  }
-
+  el('insightHeadline').textContent = 'Review your cash flow';
+  el('insightDetail').innerHTML = `<ul>${local.map(x => `<li>${escapeHtml(x)}</li>`).join('')}</ul>`;
   el('insightPanel').style.display = 'block';
 }
 
@@ -1360,6 +1347,15 @@ function localInsights() {
   const monthly = monthlySeries(state.transactions);
 
   out.push(`Current P/L is ${money(totals.pl)} after income, expenses, and user-classified savings. Ignored transfers are excluded.`);
+
+  const reviewFiles = (state.fileStats || []).filter(x => {
+    const s = x.parse_report?.status;
+    return s && s !== 'ok';
+  });
+
+  if (reviewFiles.length) {
+    out.push(`${reviewFiles.length} file(s) need review in the parse quality report before fully trusting totals.`);
+  }
 
   const best = [...monthly].sort((a,b) => b.pl - a.pl)[0];
   const worst = [...monthly].sort((a,b) => a.pl - b.pl)[0];
@@ -1380,7 +1376,7 @@ function localInsights() {
     out.push(`${ignoredRows.length} transaction(s) are currently ignored from P/L.`);
   }
 
-  return out.slice(0, 5);
+  return out.slice(0, 6);
 }
 
 function saveState() {
@@ -1412,7 +1408,7 @@ function restoreState() {
     });
 
     renderDashboard();
-    requestInsight().catch(() => {});
+    requestInsight();
 
     setMsg(`<b>Restored saved dashboard.</b> ${state.transactions.length} transactions are available. Upload more files to append new data, or Clear to reset.`, 'ok');
   } catch (e) {
