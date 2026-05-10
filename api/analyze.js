@@ -1,18 +1,13 @@
-// WYZ API - Generic Statement Analyzer
-// Purpose:
-// - Extract transactions from bank statements, credit-card statements, CSV/text exports, and payslip-like text.
-// - Keep extraction generic.
-// - Do NOT hardcode merchant names or vendor categorisation.
-// - Default classification:
-//      CR -> income
-//      DR -> expenses
-// - User can later move selected rows into savings from the frontend.
+// WYZ API - Generic Statement Analyzer with Internal Transfer Exclusion
+// Default logic:
+// - CR -> income
+// - DR -> expenses
+// - obvious card payments / payment received / card settlements -> internal_transfer, excluded from P/L
+// - savings/investments are user-controlled from frontend
 
 const MODEL = 'claude-haiku-4-5-20251001';
-
 const INSIGHT_MAX_TOKENS = 450;
 const INSIGHT_TIMEOUT_MS = 18000;
-
 const MAX_TOTAL_CHARS = 900000;
 const REJECT_ABOVE_CHARS = 1400000;
 
@@ -36,17 +31,14 @@ function cleanStatementText(text) {
 
   let t = String(text).replace(/\r/g, '\n');
 
-  // Remove large non-Latin legal/footer text blocks commonly found in bilingual statements.
   t = t.replace(
     /[\u0590-\u05FF\u0600-\u06FF\u0700-\u074F\u0750-\u077F\u0780-\u07BF\u08A0-\u08FF\u0900-\u097F\uFB50-\uFDFF\uFE70-\uFEFF]/g,
     ' '
   );
 
-  // Remove long legal/terms sections.
   t = t.replace(/General Terms and Important Information[\s\S]*$/i, '');
   t = t.replace(/Terms\s+(and|&)\s+Conditions[\s\S]{200,}$/i, '');
   t = t.replace(/Important (Information|Notice|Disclaimer)[\s\S]{200,}$/i, '');
-
   t = t.replace(/\*{3,}\s*END\s*OF\s*STATEMENT\s*\*{3,}/gi, '\nEND_OF_STATEMENT\n');
   t = t.replace(/https?:\/\/\S+/g, ' ');
   t = t.replace(/[\w.-]+@[\w.-]+\.\w+/g, ' ');
@@ -80,20 +72,14 @@ function isoFromDMY(s) {
   const m = String(s || '').trim().match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);
   if (!m) return null;
 
-  const dd = m[1].padStart(2, '0');
-  const mm = m[2].padStart(2, '0');
-  const yyyy = m[3];
-
-  return `${yyyy}-${mm}-${dd}`;
+  return `${m[3]}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}`;
 }
 
 function isoFromAnyDate(s) {
   const raw = String(s || '').trim();
 
   let m = raw.match(/^(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})$/);
-  if (m) {
-    return `${m[1]}-${m[2].padStart(2, '0')}-${m[3].padStart(2, '0')}`;
-  }
+  if (m) return `${m[1]}-${m[2].padStart(2, '0')}-${m[3].padStart(2, '0')}`;
 
   m = raw.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);
   if (!m) return null;
@@ -101,8 +87,6 @@ function isoFromAnyDate(s) {
   const a = Number(m[1]);
   const b = Number(m[2]);
 
-  // Default to DD/MM/YYYY because your current training files are UAE-style.
-  // If second part cannot be a month, assume MM/DD/YYYY.
   if (b > 12 && a <= 12) {
     return `${m[3]}-${String(a).padStart(2, '0')}-${String(b).padStart(2, '0')}`;
   }
@@ -138,14 +122,41 @@ function isNoiseLine(line) {
     /^\*{3,}/.test(line);
 }
 
+function isInternalTransferLike(t) {
+  const m = String(t.merchant || '').toUpperCase();
+
+  if (
+    /PAYMENT\s*RECEIVED/.test(m) ||
+    /PAYMENTRECEIVED/.test(m) ||
+    /CREDIT\s*CARD\s*PAYMNT/.test(m) ||
+    /CREDIT\s*CARD\s*PAYMENT/.test(m) ||
+    /CARD\s*PAYMENT/.test(m) ||
+    /PAYMENT\s*TO\s*CARD/.test(m)
+  ) {
+    return true;
+  }
+
+  return false;
+}
+
 function categorizeTxn(t) {
   const out = { ...t };
+
+  if (isInternalTransferLike(out)) {
+    out.cat = 'internal_transfer';
+    out.sub = 'ignored';
+    out.type = 'card_or_internal_payment';
+    out.freq = 'adhoc';
+    out.excluded_from_pl = true;
+    return out;
+  }
 
   if (out.direction === 'CR') {
     out.cat = 'income';
     out.sub = 'uncategorised';
     out.type = 'credit';
     out.freq = 'adhoc';
+    out.excluded_from_pl = false;
     return out;
   }
 
@@ -153,6 +164,7 @@ function categorizeTxn(t) {
   out.sub = 'uncategorised';
   out.type = 'debit';
   out.freq = 'adhoc';
+  out.excluded_from_pl = false;
   return out;
 }
 
@@ -173,6 +185,7 @@ function makeTxn({ date, merchant, amount, currency = 'AED', direction, parser =
     note: null,
     source: 'parser',
     parser,
+    excluded_from_pl: false,
   };
 
   if (raw) txn.raw = normalizeSpaces(raw).slice(0, 420);
@@ -184,8 +197,6 @@ function compactRows(rows) {
   return rows.filter(Boolean);
 }
 
-// Parser 1:
-// date + description + DR/CR/D/C/DEBIT/CREDIT + amount
 function parseTaggedSingleDate(text) {
   const rows = [];
   const lines = text.split(/\n+/).map(normalizeSpaces).filter(Boolean);
@@ -223,8 +234,6 @@ function parseTaggedSingleDate(text) {
   return compactRows(rows);
 }
 
-// Parser 2:
-// date + posting date + description + amount + optional CR/DR
 function parseTwoDateCard(text) {
   const rows = [];
   const lines = text.split(/\n+/).map(normalizeSpaces).filter(Boolean);
@@ -254,7 +263,7 @@ function parseTwoDateCard(text) {
     if (/^(CR|C|CREDIT)$/.test(marker)) direction = 'CR';
     else if (/^(DR|D|DEBIT)$/.test(marker)) direction = 'DR';
     else if (signed.isNegative) direction = 'DR';
-    else if (/\b(payment received|refund|reversal|cashback|credit adjustment)\b/i.test(desc)) direction = 'CR';
+    else if (/\b(payment received|paymentreceived|refund|reversal|cashback|credit adjustment)\b/i.test(desc)) direction = 'CR';
 
     rows.push(makeTxn({
       date: dateIso,
@@ -269,9 +278,6 @@ function parseTwoDateCard(text) {
   return compactRows(rows);
 }
 
-// Parser 3:
-// account statement format with debit / credit / balance tail.
-// Supports multiline rows where date/time/value-date are split across PDF text extraction.
 function parseAccountTable(text) {
   const lines = text
     .split(/\n+/)
@@ -292,10 +298,6 @@ function parseAccountTable(text) {
     if (!dateAtStart.test(l)) return false;
     if (twoDatesAtStart.test(l)) return true;
 
-    // Handles extraction where:
-    // line i     = posting date
-    // line i + 1 = time
-    // line i + 2 = value date + description...
     const n1 = lines[i + 1] || '';
     const n2 = lines[i + 2] || '';
 
@@ -337,8 +339,6 @@ function parseAccountTable(text) {
     let direction = null;
     let tailIndex = null;
 
-    // Most account statements end with:
-    // debit amount | credit amount | balance
     if (numeric.length >= 3) {
       const debit = parseAmount(numeric[numeric.length - 3][1]);
       const credit = parseAmount(numeric[numeric.length - 2][1]);
@@ -350,9 +350,6 @@ function parseAccountTable(text) {
       }
     }
 
-    // Fallback:
-    // amount | balance
-    // infer direction from sign or generic words.
     if (!direction && numeric.length >= 2) {
       const signed = parseSignedAmount(numeric[numeric.length - 2][1]);
 
@@ -395,8 +392,6 @@ function parseAccountTable(text) {
   return compactRows(rows);
 }
 
-// Parser 4:
-// date + description + signed amount
 function parseSignedAmountRows(text) {
   const rows = [];
   const lines = text.split(/\n+/).map(normalizeSpaces).filter(Boolean);
@@ -431,9 +426,6 @@ function parseSignedAmountRows(text) {
   return compactRows(rows);
 }
 
-// Parser 5:
-// Simple CSV parser for exported data.
-// Looks for common headers: date, description/merchant/narration, amount, debit, credit.
 function parseCsvLike(text) {
   const raw = String(text || '').trim();
   if (!raw.includes(',') && !raw.includes('\t')) return [];
@@ -527,8 +519,6 @@ function parseCsvLike(text) {
   return compactRows(rows);
 }
 
-// Parser 6:
-// Payslip style. Creates one income row from Net Pay.
 function parsePayslip(text) {
   if (!/payslip|payroll|net\s+pay/i.test(text)) return [];
 
@@ -566,7 +556,6 @@ function dedupePreserveOrder(items) {
     const key = `${t.date}|${t.direction}|${Number(t.amount).toFixed(2)}|${String(t.merchant).toUpperCase()}`;
     const count = seen.get(key) || 0;
 
-    // Keep up to 4 identical rows because real statements often contain genuine repeated transactions.
     if (count < 4) {
       seen.set(key, count + 1);
       out.push(t);
@@ -617,6 +606,7 @@ function makeParseReport({ filename, parser, rows, cleaned, candidates, warning 
   const rejected = Math.max(0, candidate.count - extracted);
 
   let confidence = 0;
+
   if (extracted > 0) {
     confidence = Math.min(0.99, extracted / Math.max(extracted, Math.min(candidate.count || extracted, extracted + 12)));
     if (/generic|signed|csv/i.test(parser || '')) confidence = Math.max(0.62, confidence - 0.08);
@@ -629,6 +619,7 @@ function makeParseReport({ filename, parser, rows, cleaned, candidates, warning 
       : 'ok';
 
   const warnings = [];
+
   if (warning) warnings.push(warning);
   if (extracted === 0) warnings.push('No transaction rows were extracted. This format may need OCR or another parser.');
   else if (status === 'warning') warnings.push(`Parsed ${extracted} rows, but about ${rejected} candidate rows may need review.`);
@@ -697,6 +688,7 @@ function summarizeTransactions(txns) {
     income: 0,
     expenses: 0,
     savings_investments: 0,
+    internal_transfer: 0,
   };
 
   for (const t of txns) {
@@ -704,6 +696,7 @@ function summarizeTransactions(txns) {
 
     if (t.cat === 'income') totals.income += amt;
     else if (t.cat === 'savings_investments') totals.savings_investments += amt;
+    else if (t.cat === 'internal_transfer') totals.internal_transfer += amt;
     else totals.expenses += amt;
   }
 
@@ -843,7 +836,7 @@ async function handleExtract(req, res) {
   return res.status(200).json(response);
 }
 
-const INSIGHT_PROMPT = `You are a careful financial coach. Given generic categorized cash-flow data, write one short, useful observation. Do not assume merchant categories. Mention that user-classified savings affect P/L if relevant. Output JSON only: {"headline":"...","detail":"...","tone":"neutral|warning|encouraging"}.`;
+const INSIGHT_PROMPT = `You are a careful financial coach. Given generic categorized cash-flow data, write one short, useful observation. Do not assume merchant categories. Internal transfers are excluded from P/L. Output JSON only: {"headline":"...","detail":"...","tone":"neutral|warning|encouraging"}.`;
 
 async function handleInsight(req, res, apiKey) {
   const { summary, transactions = [] } = req.body || {};
@@ -870,7 +863,6 @@ async function handleInsight(req, res, apiKey) {
       tone: ['neutral', 'warning', 'encouraging'].includes(obj.tone) ? obj.tone : 'neutral',
     });
   } catch (err) {
-    // Insight should never block the dashboard.
     return res.status(200).json({
       headline: null,
       detail: null,
