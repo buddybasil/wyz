@@ -9,6 +9,7 @@
 // - Internal/self/card-payment transfers are excluded from P/L.
 // - Savings/investments are user-controlled from the frontend.
 // - Bank account statements with Debit/Credit/Balance columns are forced through account_table parser.
+// - Account statement Balance column is NEVER used as transaction amount.
 
 const MODEL = 'claude-haiku-4-5-20251001';
 const INSIGHT_MAX_TOKENS = 450;
@@ -168,15 +169,17 @@ function isInternalTransferLike(t) {
     return true;
   }
 
-  // Bank-account self/family/internal transfer style rows.
-  // These are not operational spending unless user manually reclassifies them later.
+  // Conservative self/family/internal transfer detection.
+  // Do NOT ignore all B/O rows. External credits like B/O DENNY JOHN ELIAS must stay as income.
   if (
-    /\bMBTRF\b/.test(m) ||
-    /\bTRF\s*OUT\s*TO\b/.test(m) ||
+    /\bTRF\s*OUT\s*TO\s+BASIL\s+ABRAHAM\b/.test(m) ||
+    /\bTRF\s*OUT\s*TO\s+BASIL\b/.test(m) ||
+    /\bTRF\s*OUT\s*TO\s+SEENA\s+BASIL\b/.test(m) ||
+    /\bTRF\s*OUT\s*TO\s+SEENA\b/.test(m) ||
+    /\bB\/O\s+BASIL\s+ABRAHAM\b/.test(m) ||
     /\bB\/O\s+BASIL\b/.test(m) ||
+    /\bB\/O\s+SEENA\s+BASIL\b/.test(m) ||
     /\bB\/O\s+SEENA\b/.test(m) ||
-    /\bBASIL\s+ABRAHAM\b/.test(m) ||
-    /\bSEENA\s+BASIL\b/.test(m) ||
     /\bSEND\s+MONEY\s+VIA\s+AANI\b/.test(m)
   ) {
     return true;
@@ -392,10 +395,14 @@ function parseAccountTable(text) {
       rest = rest.slice(secondDateMatch[0].length).trim();
     }
 
-    // Bank account table ends with: debit credit balance.
-    // Examples:
-    // SALARY 2 0.00 33575 42841.53
-    // CREDIT CARD PAYMNT ... 9278.93 0.00 33562.6
+    // For bank account rows, the last three numeric tokens are:
+    // Debit Amount | Credit Amount | Balance
+    //
+    // Example:
+    // 638472817 B/O DENNY JOHN ELIAS PHUB6384728 17 0.00 122 10292.6
+    //
+    // The transaction amount is 122 from Credit Amount.
+    // The balance 10292.6 must NEVER be used as transaction amount.
     const nums = [...rest.matchAll(/(?:^|\s)(-?\(?\d{1,3}(?:,\d{3})*(?:\.\d+)?\)?|-?\(?\d+(?:\.\d+)?\)?)(?=\s|$)/g)];
 
     if (nums.length < 3) continue;
@@ -408,22 +415,35 @@ function parseAccountTable(text) {
     const credit = parseAmount(creditToken);
     const balance = parseAmount(balanceToken);
 
+    // Balance is only used to confirm row shape.
+    // It must not become amount.
     if (!Number.isFinite(balance)) continue;
 
-    // At least one of debit or credit must be positive.
-    if (debit <= 0 && credit <= 0) continue;
+    let amount = 0;
+    let direction = null;
 
-    const direction = credit > 0 ? 'CR' : 'DR';
-    const amount = credit > 0 ? credit : debit;
+    if (debit > 0 && credit === 0) {
+      amount = debit;
+      direction = 'DR';
+    } else if (credit > 0 && debit === 0) {
+      amount = credit;
+      direction = 'CR';
+    } else if (credit > 0 && debit > 0) {
+      // Ambiguous row. Do not guess.
+      continue;
+    } else {
+      continue;
+    }
 
+    // Description/ref area is everything before the debit column.
     const descEnd = nums[nums.length - 3].index;
     let body = rest.slice(0, descEnd).trim();
 
-    // Remove trailing reference tokens when they are clearly not part of the description.
+    // Remove trailing reference tokens while keeping useful description.
     body = body
       .replace(/\s+(PHUB\d+)\s*$/i, '')
-      .replace(/\s+([A-Z0-9]{8,})\s*$/i, '')
-      .replace(/\s+(\d{6,})\s*$/i, '')
+      .replace(/\s+([A-Z0-9]{10,})\s*$/i, '')
+      .replace(/\s+(\d{8,})\s*$/i, '')
       .replace(/\s+(A[0-9A-Z]{2,}|[0-9A-Z]{4})\s*$/i, '')
       .trim();
 
