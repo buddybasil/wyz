@@ -6,7 +6,7 @@
 // - Default categorisation:
 //   CR -> income
 //   DR -> expenses
-// - Internal/self/card-payment transfers are excluded from P/L.
+// - Internal/self/card-payment/uncertain incoming transfers are excluded from P/L.
 // - Savings/investments are user-controlled from the frontend.
 // - Bank account statements with Debit/Credit/Balance columns are forced through account_table parser.
 // - Account statement Balance column is NEVER used as transaction amount.
@@ -158,6 +158,7 @@ function isInternalTransferLike(t) {
   const m = String(t.merchant || '').toUpperCase();
 
   // Credit-card settlement/payment rows.
+  // These are not income or spending; they are movements between bank/card accounts.
   if (
     /PAYMENT\s*RECEIVED/.test(m) ||
     /PAYMENTRECEIVED/.test(m) ||
@@ -169,8 +170,8 @@ function isInternalTransferLike(t) {
     return true;
   }
 
-  // Conservative self/family/internal transfer detection.
-  // Do NOT ignore all B/O rows. External credits like B/O DENNY JOHN ELIAS must stay as income.
+  // Self/family transfers.
+  // These are excluded from P/L even if they are CR, because they are internal/family cash movements.
   if (
     /\bTRF\s*OUT\s*TO\s+BASIL\s+ABRAHAM\b/.test(m) ||
     /\bTRF\s*OUT\s*TO\s+BASIL\b/.test(m) ||
@@ -181,6 +182,15 @@ function isInternalTransferLike(t) {
     /\bB\/O\s+SEENA\s+BASIL\b/.test(m) ||
     /\bB\/O\s+SEENA\b/.test(m) ||
     /\bSEND\s+MONEY\s+VIA\s+AANI\b/.test(m)
+  ) {
+    return true;
+  }
+
+  // Uncertain incoming credits.
+  // Safer to ignore first; user can manually move these to Income after review.
+  if (
+    /\bB\/O\s+ALLIANCE\s+INSURANCE\b/.test(m) ||
+    /\bALLIANCE\s+INSURANCE\b/.test(m)
   ) {
     return true;
   }
