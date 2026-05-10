@@ -361,6 +361,7 @@
     .tag.CR{background:#e9f8ef;color:#087644}
     .tag.DR{background:#fff0ed;color:#a83225}
     .tag.savings{background:#f0ecff;color:#6036c7}
+    .tag.internal{background:#eef0f3;color:#555}
 
     .insight{
       padding:18px;
@@ -476,14 +477,14 @@
 <body>
 <header class="top">
   <div class="brand"><div class="logo">▰</div>Wyz</div>
-  <div class="pill">Generic parser · user-controlled savings</div>
+  <div class="pill">Generic parser · ignored transfers · user savings</div>
 </header>
 
 <main class="wrap">
   <section class="hero">
     <div class="card upload">
       <h1>Upload your statements</h1>
-      <p>PDF or CSV — credit cards, bank accounts, and payslips. Wyz extracts transactions, keeps categorisation generic, and lets you move selected rows into savings.</p>
+      <p>PDF or CSV — credit cards, bank accounts, and payslips. Wyz extracts transactions, excludes card settlements from P/L, and lets you move selected rows into Savings or Ignored.</p>
 
       <input id="fileInput" type="file" multiple accept=".pdf,.csv,.txt" hidden />
 
@@ -514,12 +515,12 @@
       <div class="status">
         <div id="s1" class="step"><div class="dot"></div>Reading file text with layout preservation</div>
         <div id="s2" class="step"><div class="dot"></div>Applying generic statement parsers</div>
-        <div id="s3" class="step"><div class="dot"></div>Assigning CR to income and DR to expenses</div>
+        <div id="s3" class="step"><div class="dot"></div>Excluding obvious card-payment transfers</div>
         <div id="s4" class="step"><div class="dot"></div>Building dashboard</div>
       </div>
 
       <div class="msg">
-        <b>Review mode:</b> Search for items such as insurance, transfers, or investments, select visible rows, and move them to Savings when needed.
+        <b>Review mode:</b> Search for items such as investments, savings, self-transfers, or family transfers. Select visible rows and move them to Savings or Ignored.
       </div>
     </div>
   </section>
@@ -536,19 +537,25 @@
           <div class="card metric">
             <span>Income</span>
             <strong id="mIncome">AED 0</strong>
-            <small>All CR rows unless manually moved</small>
+            <small>Credits counted in P/L</small>
           </div>
 
           <div class="card metric">
             <span>Expenses</span>
             <strong id="mExpenses">AED 0</strong>
-            <small>All DR rows unless manually moved</small>
+            <small>Debits counted in P/L</small>
           </div>
 
           <div class="card metric">
             <span>Savings</span>
             <strong id="mSavings">AED 0</strong>
-            <small>User-selected rows moved from expenses/income</small>
+            <small>User-selected savings/investments</small>
+          </div>
+
+          <div class="card metric">
+            <span>Ignored transfers</span>
+            <strong id="mIgnored">AED 0</strong>
+            <small>Card payments/internal movements excluded from P/L</small>
           </div>
 
           <div class="card metric">
@@ -568,7 +575,7 @@
 
       <div class="sectionBody">
         <p class="chartNote">
-          Compact monthly trend view. <b>P/L</b> is calculated as <b>Income − Expenses − Savings</b>. Use search and “Move selected to Savings” to correct investment/savings rows.
+          Compact monthly trend view. <b>P/L</b> is calculated as <b>Income − Expenses − Savings</b>. Ignored transfers are excluded from the chart and P/L.
         </p>
 
         <div class="chartWrap">
@@ -626,6 +633,7 @@
               <option value="income">Income</option>
               <option value="expenses">Expenses</option>
               <option value="savings_investments">Savings</option>
+              <option value="internal_transfer">Ignored transfers</option>
             </select>
           </div>
 
@@ -633,6 +641,7 @@
             <button id="moveIncome" class="ghostBtn smallBtn">Move selected to Income</button>
             <button id="moveExpense" class="ghostBtn smallBtn">Move selected to Expenses</button>
             <button id="moveSavings" class="ghostBtn smallBtn">Move selected to Savings</button>
+            <button id="moveIgnored" class="ghostBtn smallBtn">Move selected to Ignored</button>
             <button id="downloadCsv" class="smallBtn">Download CSV</button>
             <button id="clearBtn" class="ghostBtn smallBtn">Clear</button>
           </div>
@@ -663,7 +672,7 @@
 
 <script>
 const API_URL = '/api/analyze';
-const STORAGE_KEY = 'wyz.saved.generic.v1';
+const STORAGE_KEY = 'wyz.saved.generic.v2';
 
 const state = {
   files: [],
@@ -925,13 +934,13 @@ el('analyzeBtn').onclick = async () => {
   );
 
   el('analyzeBtn').disabled = false;
-
   requestInsight().catch(console.warn);
 };
 
 function labelCategory(cat) {
   if (cat === 'income') return 'Income';
   if (cat === 'savings_investments') return 'Savings';
+  if (cat === 'internal_transfer') return 'Ignored';
   return 'Expenses';
 }
 
@@ -939,7 +948,8 @@ function summarize(txns) {
   const totals = {
     income: 0,
     expenses: 0,
-    savings_investments: 0
+    savings_investments: 0,
+    internal_transfer: 0
   };
 
   for (const t of txns) {
@@ -947,6 +957,7 @@ function summarize(txns) {
 
     if (t.cat === 'income') totals.income += amt;
     else if (t.cat === 'savings_investments') totals.savings_investments += amt;
+    else if (t.cat === 'internal_transfer') totals.internal_transfer += amt;
     else totals.expenses += amt;
   }
 
@@ -980,6 +991,7 @@ function monthlySeries(txns) {
       income: 0,
       expenses: 0,
       savings: 0,
+      ignored: 0,
       pl: 0
     }
   ]));
@@ -993,6 +1005,7 @@ function monthlySeries(txns) {
 
     if (t.cat === 'income') row.income += amt;
     else if (t.cat === 'savings_investments') row.savings += amt;
+    else if (t.cat === 'internal_transfer') row.ignored += amt;
     else row.expenses += amt;
   }
 
@@ -1008,6 +1021,7 @@ function renderDashboard() {
   el('mIncome').textContent = money(totals.income);
   el('mExpenses').textContent = money(totals.expenses);
   el('mSavings').textContent = money(totals.savings_investments);
+  el('mIgnored').textContent = money(totals.internal_transfer);
   el('mPL').textContent = money(totals.pl);
 
   el('dashboard').style.display = 'block';
@@ -1071,10 +1085,10 @@ function renderTrendChart() {
 
   stats.innerHTML = `
     <div class="tinyCard"><span>Months covered</span><b>${series.length}</b></div>
-    <div class="tinyCard"><span>Average monthly income</span><b>${money(totals.income / series.length)}</b></div>
-    <div class="tinyCard"><span>Average monthly expenses</span><b>${money(totals.expenses / series.length)}</b></div>
-    <div class="tinyCard"><span>Average monthly savings</span><b>${money(totals.savings_investments / series.length)}</b></div>
-    <div class="tinyCard"><span>Average monthly P/L</span><b>${money(totals.pl / series.length)}</b></div>
+    <div class="tinyCard"><span>Avg monthly income</span><b>${money(totals.income / series.length)}</b></div>
+    <div class="tinyCard"><span>Avg monthly expenses</span><b>${money(totals.expenses / series.length)}</b></div>
+    <div class="tinyCard"><span>Avg monthly savings</span><b>${money(totals.savings_investments / series.length)}</b></div>
+    <div class="tinyCard"><span>Avg monthly P/L</span><b>${money(totals.pl / series.length)}</b></div>
   `;
 
   holder.innerHTML = `
@@ -1174,8 +1188,12 @@ function renderTable() {
     .filter(t => t.cat === 'savings_investments')
     .reduce((a, t) => a + (Number(t.amount) || 0), 0);
 
+  const ignored = rows
+    .filter(t => t.cat === 'internal_transfer')
+    .reduce((a, t) => a + (Number(t.amount) || 0), 0);
+
   el('visibleTotal').textContent = rows.length
-    ? ` · visible DR ${money(dr)}${cr ? `, CR ${money(cr)}` : ''}${savings ? `, Savings ${money(savings)}` : ''} · ${rows.length} rows`
+    ? ` · visible DR ${money(dr)}${cr ? `, CR ${money(cr)}` : ''}${savings ? `, Savings ${money(savings)}` : ''}${ignored ? `, Ignored ${money(ignored)}` : ''} · ${rows.length} rows`
     : '';
 
   el('tbody').innerHTML = rows.map(t => `
@@ -1186,7 +1204,7 @@ function renderTable() {
       <td><span class="tag ${t.direction}">${t.direction}</span></td>
       <td class="merchant">${escapeHtml(t.merchant || '')}</td>
       <td>${money(t.amount)}</td>
-      <td><span class="tag ${t.cat === 'savings_investments' ? 'savings' : ''}">${escapeHtml(labelCategory(t.cat))}</span></td>
+      <td><span class="tag ${t.cat === 'savings_investments' ? 'savings' : ''} ${t.cat === 'internal_transfer' ? 'internal' : ''}">${escapeHtml(labelCategory(t.cat))}</span></td>
       <td class="mini">${escapeHtml(t._file || '')}</td>
     </tr>
   `).join('');
@@ -1212,11 +1230,20 @@ function moveSelectedTo(cat) {
     if (selected.has(Number(t._globalSeq))) {
       t.cat = cat;
       t.sub = 'user_reviewed';
-      t.type = cat === 'income'
-        ? 'credit'
-        : cat === 'savings_investments'
-          ? 'saving_or_investment'
-          : 'debit';
+
+      if (cat === 'income') {
+        t.type = 'credit';
+        t.excluded_from_pl = false;
+      } else if (cat === 'savings_investments') {
+        t.type = 'saving_or_investment';
+        t.excluded_from_pl = false;
+      } else if (cat === 'internal_transfer') {
+        t.type = 'ignored_transfer';
+        t.excluded_from_pl = true;
+      } else {
+        t.type = 'debit';
+        t.excluded_from_pl = false;
+      }
 
       t.user_classified = true;
     }
@@ -1238,6 +1265,7 @@ el('selectVisible').onchange = e => {
 el('moveIncome').onclick = () => moveSelectedTo('income');
 el('moveExpense').onclick = () => moveSelectedTo('expenses');
 el('moveSavings').onclick = () => moveSelectedTo('savings_investments');
+el('moveIgnored').onclick = () => moveSelectedTo('internal_transfer');
 
 el('search').oninput = renderTable;
 el('catFilter').onchange = renderTable;
@@ -1273,6 +1301,7 @@ el('downloadCsv').onclick = () => {
     'freq',
     'file',
     'parser',
+    'excluded_from_pl',
     'user_classified'
   ];
 
@@ -1330,7 +1359,7 @@ function localInsights() {
   const totals = summarize(state.transactions);
   const monthly = monthlySeries(state.transactions);
 
-  out.push(`Current P/L is ${money(totals.pl)} after income, expenses, and user-classified savings.`);
+  out.push(`Current P/L is ${money(totals.pl)} after income, expenses, and user-classified savings. Ignored transfers are excluded.`);
 
   const best = [...monthly].sort((a,b) => b.pl - a.pl)[0];
   const worst = [...monthly].sort((a,b) => a.pl - b.pl)[0];
@@ -1339,11 +1368,16 @@ function localInsights() {
   if (worst && (!best || worst.month !== best.month)) out.push(`Weakest month by P/L: ${worst.label} at ${money(worst.pl)}.`);
 
   const savingsRows = state.transactions.filter(t => t.cat === 'savings_investments');
+  const ignoredRows = state.transactions.filter(t => t.cat === 'internal_transfer');
 
   if (savingsRows.length) {
     out.push(`${savingsRows.length} transaction(s) have been manually classified as Savings.`);
   } else {
-    out.push(`Tip: Search for investment or savings transactions, select visible rows, and move them to Savings.`);
+    out.push(`Tip: Search for savings/investment transactions, select visible rows, and move them to Savings.`);
+  }
+
+  if (ignoredRows.length) {
+    out.push(`${ignoredRows.length} transaction(s) are currently ignored from P/L.`);
   }
 
   return out.slice(0, 5);
