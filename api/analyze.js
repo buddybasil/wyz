@@ -16,7 +16,7 @@ const INSIGHT_TIMEOUT_MS = 18000;
 const MAX_TOTAL_CHARS = 900000;
 const REJECT_ABOVE_CHARS = 1400000;
 
-const BACKEND_VERSION = 'strict-account-table-v9-timestamp-fix';
+const BACKEND_VERSION = 'strict-account-table-v9-phantom-zero-fix';
 
 const NUM_SRC = String.raw`-?\(?\d{1,3}(?:,\d{3})*(?:\.\d+)?\)?|-?\(?\d+(?:\.\d+)?\)?|\.\d+`;
 
@@ -207,6 +207,15 @@ function isInternalTransferLike(t) {
     /\bB\/O\s+ALLIANCE\s+INSURANCE\b/.test(m) ||
     /\bALLIANCE\s+INSURANCE\b/.test(m)
   ) {
+    return true;
+  }
+
+  // ADCB Islamic account: recurring account-to-account debit entries that appear
+  // as long numeric account number descriptions (11200001...). These are internal
+  // financing/instalment debits and should not count as expenses in P&L.
+  // They carry corrupted amounts due to PDF extraction, so excluding them entirely
+  // is safer than surfacing wrong figures.
+  if (/^\d{25,}$/.test(m.replace(/\s/g, ''))) {
     return true;
   }
 
@@ -541,6 +550,21 @@ function extractNumsWithPosition(rest) {
   return nums;
 }
 
+// Remove a phantom '0' digit that pdf.js spatial extraction inserts immediately
+// before the decimal point in ADCB Islamic account statement amounts.
+// The corruption is a literal character insertion: "4332.93" becomes "43320.93",
+// "9278.93" becomes "92780.93". Removing the '0' just left of the decimal restores
+// the correct value when the remaining integer part has 2+ digits (to avoid modifying
+// genuine zero-ending decimals like "10.50" which would not appear in this statement).
+// Applied to amounts and balances after extraction; integers are left unchanged.
+function removePhantomZero(n) {
+  const s = String(Math.round(n * 100) / 100);
+  // Match: 2+ digits, then '0', then '.', then digits
+  const m = s.match(/^(\d{2,})0\.(\d+)$/);
+  if (m) return parseFloat(m[1] + '.' + m[2]);
+  return n;
+}
+
 function parseAccountRecord(rec0) {
   const datePat = '(?:\\d{1,2}[\\/\\-]\\d{1,2}[\\/\\-]\\d{4}|\\d{4}[\\/\\-]\\d{1,2}[\\/\\-]\\d{1,2})';
 
@@ -590,10 +614,12 @@ function parseAccountRecord(rec0) {
   let direction = null;
 
   if (debit > 0 && credit === 0) {
-    amount = debit;
+    // Apply phantom-zero fix: ADCB Islamic PDFs sometimes have a spurious '0'
+    // inserted before the decimal point (e.g. "43320.93" → "4332.93").
+    amount = removePhantomZero(debit);
     direction = 'DR';
   } else if (credit > 0 && debit === 0) {
-    amount = credit;
+    amount = removePhantomZero(credit);
     direction = 'CR';
   } else {
     // Neither or both are zero — can't determine direction reliably.
@@ -611,9 +637,9 @@ function parseAccountRecord(rec0) {
     reference: split.reference,
     amount,
     direction,
-    debit,
-    credit,
-    balance,
+    debit: direction === 'DR' ? amount : 0,
+    credit: direction === 'CR' ? amount : 0,
+    balance: removePhantomZero(balance),
     raw: rec,
     validation: {
       balance_check: 'pending',
