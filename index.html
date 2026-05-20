@@ -557,7 +557,7 @@ th{
 <body>
 <header class="top">
   <div class="brand"><div class="logo">▰</div>Wyz</div>
-  <div class="pill">v8 · Balance checksum · Duplicate aware</div>
+  <div class="pill">v9 · Balance checksum · Duplicate aware</div>
 </header>
 
 <main class="wrap">
@@ -732,7 +732,7 @@ th{
 
 <script>
 const API_URL = '/api/analyze';
-const STORAGE_KEY = 'wyz.saved.generic.v8';
+const STORAGE_KEY = 'wyz.saved.generic.v9';
 
 const state = {
   files: [],
@@ -813,6 +813,13 @@ window.removeFile = i => {
   renderFiles();
 };
 
+// Regex to detect standalone time tokens of the form HH:MM or HH:MM:SS.
+// These appear as separate pdf.js text items in ADCB Islamic account statement PDFs.
+// When assembled into a line by X-coordinate sort they cause their digits to bleed
+// into adjacent amount columns, corrupting values by roughly 10x.
+// Filtering them here (before joining items into a line) prevents the corruption.
+const STANDALONE_TIME_RE = /^\d{1,2}:\d{2}(:\d{2})?$/;
+
 async function extractPdfText(file) {
   const ab = await file.arrayBuffer();
 
@@ -830,6 +837,14 @@ async function extractPdfText(file) {
     for (const item of content.items) {
       const str = (item.str || '').trim();
       if (!str) continue;
+
+      // Skip standalone time tokens (HH:MM or HH:MM:SS).
+      // ADCB Islamic account statements include a timestamp column whose items
+      // sit at the same Y coordinate as amount column items. Without filtering,
+      // the time token's digits merge into adjacent amounts during X-sort join,
+      // inflating them by approximately 10x. This filter is the primary fix;
+      // the backend also strips these patterns as a second line of defence.
+      if (STANDALONE_TIME_RE.test(str)) continue;
 
       const y = Math.round(item.transform[5]);
       const x = item.transform[4];
