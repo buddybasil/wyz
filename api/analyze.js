@@ -4,6 +4,7 @@
 // - Bank-account statements: parses Debit Amount and Credit Amount only.
 // - The right-most account-statement number is treated as Balance and discarded.
 // - Balance is NEVER used as transaction amount.
+// - Account statement visible description is kept separate from Ref/Cheque No.
 // - CR -> income unless ignored.
 // - DR -> expenses unless ignored.
 // - Internal/self/card-payment/uncertain incoming transfers are excluded from P/L.
@@ -39,6 +40,7 @@ function cleanStatementText(text) {
 
   let t = String(text).replace(/\r/g, '\n');
 
+  // Remove Arabic/Hebrew/Indic blocks that often duplicate English labels in bilingual statements.
   t = t.replace(
     /[\u0590-\u05FF\u0600-\u06FF\u0700-\u074F\u0750-\u077F\u0780-\u07BF\u08A0-\u08FF\u0900-\u097F\uFB50-\uFDFF\uFE70-\uFEFF]/g,
     ' '
@@ -348,26 +350,16 @@ function splitAccountDescriptionAndReference(body) {
   const text = normalizeSpaces(body);
 
   if (!text) {
-    return { description: '', reference: null };
-  }
-
-  let m = text.match(/^SALARY\s+(.+)$/i);
-  if (m) {
     return {
-      description: 'SALARY',
-      reference: normalizeSpaces(m[1]),
+      description: '',
+      reference: null,
     };
   }
 
-  m = text.match(/^(.*?)\s+(PHUB[0-9A-Z]+(?:\s+[0-9A-Z]+)?)$/i);
-  if (m) {
-    return {
-      description: normalizeSpaces(m[1]),
-      reference: normalizeSpaces(m[2]),
-    };
-  }
-
-  m = text.match(/^(.*?)\s+(\d{8,}\s+[A-Z0-9]{2,})$/i);
+  // Salary rows:
+  // PDF Description = SALARY
+  // Ref/Cheque No = 1 / 2 / 5 / 9 etc.
+  let m = text.match(/^(SALARY)\s+(.+)$/i);
   if (m) {
     return {
       description: normalizeSpaces(m[1]),
@@ -375,7 +367,10 @@ function splitAccountDescriptionAndReference(body) {
     };
   }
 
-  m = text.match(/^(.*?)\s+([A-Z0-9]{8,}\s+[A-Z0-9]{2,})$/i);
+  // PHUB reference rows:
+  // Description: "638472817 B/O DENNY JOHN ELIAS"
+  // Ref: "PHUB6384728 17"
+  m = text.match(/^(.*?)\s+(PHUB[0-9A-Z]+(?:\s+[0-9A-Z]+)*)$/i);
   if (m) {
     return {
       description: normalizeSpaces(m[1]),
@@ -383,7 +378,10 @@ function splitAccountDescriptionAndReference(body) {
     };
   }
 
-  m = text.match(/^(.*?)\s+(\d{8,})$/i);
+  // Cheque rows:
+  // Description: "I/W CLEARING CHEQUE ..."
+  // Ref: "000034"
+  m = text.match(/^(I\/W\s+CLEARING\s+CHEQUE.+?)\s+(\d{4,})$/i);
   if (m) {
     return {
       description: normalizeSpaces(m[1]),
@@ -391,6 +389,59 @@ function splitAccountDescriptionAndReference(body) {
     };
   }
 
+  // Purchases with long numeric reference:
+  // Description: "PUR 15/11 ADPAY ITC ABUDHABI 3342"
+  // Ref: "090235425319 ASMV"
+  m = text.match(/^(.*?\b3342)\s+(\d{8,}(?:\s+[A-Z0-9]+)*)$/i);
+  if (m) {
+    return {
+      description: normalizeSpaces(m[1]),
+      reference: normalizeSpaces(m[2]),
+    };
+  }
+
+  // ATM withdrawal rows with long DIB reference:
+  // Keep ATM text as description, put long numeric tail into reference.
+  m = text.match(/^(ATM\s+WDL.+?\bAE)\s+([A-Z0-9\s]{8,})$/i);
+  if (m) {
+    return {
+      description: normalizeSpaces(m[1]),
+      reference: normalizeSpaces(m[2]),
+    };
+  }
+
+  // Send Money via Aani rows:
+  // Keep beneficiary line as description, move PHUB/P2P tail to reference where possible.
+  m = text.match(/^(Send\s+Money\s+via\s+Aani.+?)\s+((?:P2P|PHUB)[A-Z0-9\s]+)$/i);
+  if (m) {
+    return {
+      description: normalizeSpaces(m[1]),
+      reference: normalizeSpaces(m[2]),
+    };
+  }
+
+  // MBTRF/B/O rows with trailing numeric bank reference.
+  m = text.match(/^(.*?\b(?:B\/O|TRF\s+OUT\s+TO)\b.*?)\s+(\d{8,})$/i);
+  if (m) {
+    return {
+      description: normalizeSpaces(m[1]),
+      reference: normalizeSpaces(m[2]),
+    };
+  }
+
+  // Pure long-number rows:
+  // Description: first long transaction identifier
+  // Ref: remaining bank reference
+  m = text.match(/^(\d{12,})\s+(.+)$/i);
+  if (m) {
+    return {
+      description: normalizeSpaces(m[1]),
+      reference: normalizeSpaces(m[2]),
+    };
+  }
+
+  // Generic fallback: keep full body as description.
+  // Do not guess too aggressively.
   return {
     description: text,
     reference: null,
@@ -454,19 +505,34 @@ function parseAccountTable(text) {
       rest = rest.slice(secondDate[0].length).trim();
     }
 
-    const nums = [...rest.matchAll(new RegExp(`(?:^|\\s)(${NUM_SRC})(?=\\s|$)`, 'g'))];
+    const amountRe = new RegExp(`(^|\\s)(${NUM_SRC})(?=\\s|$)`, 'g');
+    const nums = [];
 
-    // Need at least Debit, Credit, and Balance.
+    for (const m of rest.matchAll(amountRe)) {
+      const prefix = m[1] || '';
+      const value = m[2];
+      const start = m.index + prefix.length;
+      const end = start + value.length;
+
+      nums.push({
+        value,
+        start,
+        end,
+      });
+    }
+
+    // Account table requires Debit, Credit, Balance at the end.
+    // If this cannot be proven, skip the row. Do not guess.
     if (nums.length < 3) continue;
 
     // HARD RULE:
-    // Right-most number is Balance. Discard it completely.
-    // The two numbers before it are Debit Amount and Credit Amount.
-    const debitMatch = nums[nums.length - 3];
-    const creditMatch = nums[nums.length - 2];
+    // Last number = Balance. Completely discard it.
+    // Previous two numbers = Debit Amount and Credit Amount.
+    const debitToken = nums[nums.length - 3];
+    const creditToken = nums[nums.length - 2];
 
-    const debit = parseAmount(debitMatch[1]);
-    const credit = parseAmount(creditMatch[1]);
+    const debit = parseAmount(debitToken.value);
+    const credit = parseAmount(creditToken.value);
 
     let amount = 0;
     let direction = null;
@@ -478,14 +544,15 @@ function parseAccountTable(text) {
       amount = credit;
       direction = 'CR';
     } else {
-      // Both zero or both positive means ambiguous. Skip. Do not guess.
+      // Both zero or both positive means ambiguous.
+      // Skip instead of risking wrong totals.
       continue;
     }
 
     if (!direction || amount <= 0) continue;
 
-    // Everything before the Debit Amount column is Description + Ref/Cheque No.
-    const body = rest.slice(0, debitMatch.index).trim();
+    // Everything before Debit Amount is Description + Ref/Cheque No.
+    const body = normalizeSpaces(rest.slice(0, debitToken.start));
     const split = splitAccountDescriptionAndReference(body);
 
     if (!split.description || split.description.length < 2) continue;
@@ -669,6 +736,7 @@ function dedupePreserveOrder(items) {
     const key = `${t.date}|${t.direction}|${Number(t.amount).toFixed(2)}|${String(t.merchant).toUpperCase()}|${String(t.reference || '').toUpperCase()}`;
     const count = seen.get(key) || 0;
 
+    // Keep up to 4 identical rows because real statements can have genuine repeated same-day transactions.
     if (count < 4) {
       seen.set(key, count + 1);
       out.push(t);
@@ -1038,7 +1106,7 @@ async function handleExtract(req, res) {
   const summary = summarizeTransactions(rows);
 
   const response = {
-    backend_version: 'strict-account-table-v6-discard-balance',
+    backend_version: 'strict-account-table-v7-exact-description-no-balance',
     transactions: rows,
     count: rows.length,
     filename: filename || null,
