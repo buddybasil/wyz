@@ -1,5 +1,5 @@
 // WYZ API - Generic Statement Analyzer
-// v8:
+// v9:
 // - Account statements: Debit/Credit/Balance table shape.
 // - Balance is NEVER used as transaction amount.
 // - Balance is used only for row validation/checksum where possible.
@@ -7,6 +7,8 @@
 // - Extraction first, classification second.
 // - Internal transfers/card settlements are excluded from P/L.
 // - Claude is only used for optional insight generation, never for extraction.
+// - v9 fix: strip HH:MM:SS timestamps from account statement records before
+//   number extraction to prevent timestamp digit bleed into amounts.
 
 const MODEL = 'claude-haiku-4-5-20251001';
 const INSIGHT_MAX_TOKENS = 450;
@@ -14,7 +16,7 @@ const INSIGHT_TIMEOUT_MS = 18000;
 const MAX_TOTAL_CHARS = 900000;
 const REJECT_ABOVE_CHARS = 1400000;
 
-const BACKEND_VERSION = 'strict-account-table-v8-balance-check-duplicates-ready';
+const BACKEND_VERSION = 'strict-account-table-v9-timestamp-fix';
 
 const NUM_SRC = String.raw`-?\(?\d{1,3}(?:,\d{3})*(?:\.\d+)?\)?|-?\(?\d+(?:\.\d+)?\)?|\.\d+`;
 
@@ -52,6 +54,13 @@ function cleanStatementText(text) {
   t = t.replace(/\*{3,}\s*END\s*OF\s*STATEMENT\s*\*{3,}/gi, '\n******* END OF STATEMENT *******\n');
   t = t.replace(/https?:\/\/\S+/g, ' ');
   t = t.replace(/[\w.-]+@[\w.-]+\.\w+/g, ' ');
+
+  // Strip standalone HH:MM:SS and HH:MM time tokens that appear in ADCB Islamic account
+  // statements. These sit between date columns and amount columns and their digits bleed
+  // into adjacent numbers during pdf.js spatial extraction. Strip them here as a second
+  // line of defence (the frontend also strips them during extraction).
+  t = t.replace(/\b(\d{1,2}:\d{2}:\d{2})\b/g, ' ');
+
   t = t.replace(/[ \t]+/g, ' ');
   t = t.replace(/\n{3,}/g, '\n\n');
 
@@ -395,8 +404,6 @@ function splitAccountDescriptionAndReference(body) {
   }
 
   // Salary rows:
-  // PDF Description = SALARY
-  // Ref/Cheque No = 1 / 2 / 5 / 9 etc.
   let m = text.match(/^(SALARY)\s+(.+)$/i);
   if (m) {
     return {
@@ -405,9 +412,7 @@ function splitAccountDescriptionAndReference(body) {
     };
   }
 
-  // PHUB reference rows:
-  // Description: "638472817 B/O DENNY JOHN ELIAS"
-  // Ref: "PHUB6384728 17"
+  // PHUB reference rows.
   m = text.match(/^(.*?)\s+(PHUB[0-9A-Z]+(?:\s+[0-9A-Z]+)*)$/i);
   if (m) {
     return {
@@ -539,7 +544,16 @@ function extractNumsWithPosition(rest) {
 function parseAccountRecord(rec0) {
   const datePat = '(?:\\d{1,2}[\\/\\-]\\d{1,2}[\\/\\-]\\d{4}|\\d{4}[\\/\\-]\\d{1,2}[\\/\\-]\\d{1,2})';
 
-  const rec = normalizeSpaces(fixAccountAmountOcr(rec0));
+  // Strip HH:MM:SS and HH:MM time tokens before any processing.
+  // ADCB Islamic account statement PDFs embed a timestamp column (e.g. 03:39:59)
+  // in each row. pdf.js spatial extraction merges these into the same text line as
+  // the amount columns, and the timestamp digits bleed into adjacent numbers making
+  // them appear ~10x too large. Stripping them here (after the frontend also strips
+  // them) is the second line of defence.
+  const rec = normalizeSpaces(fixAccountAmountOcr(
+    String(rec0 || '').replace(/\b\d{1,2}:\d{2}(:\d{2})?\b/g, ' ')
+  ));
+
   if (!rec) return null;
 
   const dateMatches = [...rec.matchAll(new RegExp(datePat, 'g'))];
@@ -550,10 +564,7 @@ function parseAccountRecord(rec0) {
 
   let rest = rec.slice(dateMatches[0].index + dateMatches[0][0].length).trim();
 
-  // Remove posting time.
-  rest = rest.replace(/^\d{1,2}:\d{2}(?::\d{2})?\s+/, '').trim();
-
-  // Remove value date if present.
+  // Remove value date if present (second date token at the start of rest).
   const secondDate = rest.match(new RegExp(`^(${datePat})\\b`));
   if (secondDate) {
     rest = rest.slice(secondDate[0].length).trim();
@@ -561,12 +572,12 @@ function parseAccountRecord(rec0) {
 
   const nums = extractNumsWithPosition(rest);
 
-  // Account table requires Debit, Credit, Balance.
+  // Account table requires at least Debit, Credit, Balance (3 numbers).
   if (nums.length < 3) return null;
 
   // Default table rule:
   // Last number = Balance.
-  // Previous two numbers = Debit and Credit.
+  // Previous two = Debit and Credit (exactly one of them is 0).
   const debitToken = nums[nums.length - 3];
   const creditToken = nums[nums.length - 2];
   const balanceToken = nums[nums.length - 1];
@@ -585,6 +596,7 @@ function parseAccountRecord(rec0) {
     amount = credit;
     direction = 'CR';
   } else {
+    // Neither or both are zero — can't determine direction reliably.
     return null;
   }
 
@@ -613,9 +625,6 @@ function parseAccountRecord(rec0) {
 function validateRunningBalances(parsed) {
   if (!parsed.length) return parsed;
 
-  // Account statements are often reverse chronological.
-  // For two adjacent rows in display order:
-  // olderBalance should equal newerBalance + newerDebit - newerCredit.
   const tolerance = 0.05;
 
   for (let i = 0; i < parsed.length; i++) {
@@ -646,7 +655,6 @@ function validateRunningBalances(parsed) {
       cur.validation.balance_check = 'passed_reverse_order';
       cur.validation.balance_diff = Math.round(diff * 100) / 100;
     } else {
-      // Also check chronological direction just in case rows are ascending.
       const expectedCurrentBalance =
         Number(nextOlder.balance) - Number(cur.debit || 0) + Number(cur.credit || 0);
 
