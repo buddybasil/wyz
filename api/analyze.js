@@ -1,13 +1,11 @@
 // WYZ API - Generic Statement Analyzer
-// Strict version:
-// - Credit-card statements: parses date / description / DR-CR / amount.
-// - Bank-account statements: parses Debit Amount and Credit Amount only.
-// - The right-most account-statement number is treated as Balance and discarded.
+// v8:
+// - Account statements: Debit/Credit/Balance table shape.
 // - Balance is NEVER used as transaction amount.
-// - Account statement visible description is kept separate from Ref/Cheque No.
-// - CR -> income unless ignored.
-// - DR -> expenses unless ignored.
-// - Internal/self/card-payment/uncertain incoming transfers are excluded from P/L.
+// - Balance is used only for row validation/checksum where possible.
+// - Credit card statements: row-based parser using Amount + CR marker where present.
+// - Extraction first, classification second.
+// - Internal transfers/card settlements are excluded from P/L.
 // - Claude is only used for optional insight generation, never for extraction.
 
 const MODEL = 'claude-haiku-4-5-20251001';
@@ -15,6 +13,8 @@ const INSIGHT_MAX_TOKENS = 450;
 const INSIGHT_TIMEOUT_MS = 18000;
 const MAX_TOTAL_CHARS = 900000;
 const REJECT_ABOVE_CHARS = 1400000;
+
+const BACKEND_VERSION = 'strict-account-table-v8-balance-check-duplicates-ready';
 
 const NUM_SRC = String.raw`-?\(?\d{1,3}(?:,\d{3})*(?:\.\d+)?\)?|-?\(?\d+(?:\.\d+)?\)?|\.\d+`;
 
@@ -61,7 +61,12 @@ function cleanStatementText(text) {
 function parseAmount(v) {
   if (v == null) return 0;
 
-  const cleaned = String(v)
+  let raw = String(v).trim();
+
+  // Handle balance values like ".56".
+  if (/^\.\d+$/.test(raw)) raw = `0${raw}`;
+
+  const cleaned = raw
     .replace(/,/g, '')
     .replace(/[^\d.\-()[\]]/g, '');
 
@@ -148,6 +153,16 @@ function looksLikeBankAccountStatement(text) {
   return hasAccountHeader && hasBankColumns;
 }
 
+function looksLikeCreditCardStatement(text) {
+  const s = String(text || '').toUpperCase();
+
+  return (
+    /CREDIT\s+CARD\s+STATEMENT/.test(s) ||
+    /STATEMENT\s+OF\s+ACCOUNT\s+-\s+CREDIT\s+CARD/.test(s) ||
+    /CARD\s+NUMBER/.test(s)
+  ) && /TRANSACTION\s+DATE/.test(s) && /AMOUNT/.test(s);
+}
+
 function isInternalTransferLike(t) {
   const m = String(t.merchant || '').toUpperCase();
 
@@ -227,14 +242,19 @@ function makeTxn({
   parser = null,
   raw = null,
   reference = null,
+  statement_type = null,
+  balance = null,
+  debit = null,
+  credit = null,
+  validation = null,
 }) {
   const amt = Number(amount) || 0;
   if (!date || amt <= 0) return null;
 
   const txn = {
     date,
-    merchant: normalizeSpaces(merchant).slice(0, 420) || 'Unknown',
-    reference: reference ? normalizeSpaces(reference).slice(0, 220) : null,
+    merchant: normalizeSpaces(merchant).slice(0, 520) || 'Unknown',
+    reference: reference ? normalizeSpaces(reference).slice(0, 260) : null,
     amount: Math.round(amt * 100) / 100,
     currency,
     direction: direction === 'CR' ? 'CR' : 'DR',
@@ -245,10 +265,25 @@ function makeTxn({
     note: null,
     source: 'parser',
     parser,
+    statement_type,
     excluded_from_pl: false,
   };
 
-  if (raw) txn.raw = normalizeSpaces(raw).slice(0, 700);
+  if (balance != null && Number.isFinite(Number(balance))) {
+    txn.balance = Math.round(Number(balance) * 100) / 100;
+  }
+
+  if (debit != null && Number.isFinite(Number(debit))) {
+    txn.debit = Math.round(Number(debit) * 100) / 100;
+  }
+
+  if (credit != null && Number.isFinite(Number(credit))) {
+    txn.credit = Math.round(Number(credit) * 100) / 100;
+  }
+
+  if (validation) txn.validation = validation;
+
+  if (raw) txn.raw = normalizeSpaces(raw).slice(0, 900);
 
   return categorizeTxn(txn);
 }
@@ -285,6 +320,7 @@ function parseTaggedSingleDate(text) {
       amount,
       direction: /^(CR|C|CREDIT)$/i.test(m[3]) ? 'CR' : 'DR',
       parser: 'tagged_single_date',
+      statement_type: 'generic',
       raw: line,
     }));
   }
@@ -330,6 +366,7 @@ function parseTwoDateCard(text) {
       amount: signed.amount,
       direction,
       parser: 'two_date_card',
+      statement_type: 'credit_card',
       raw: line,
     }));
   }
@@ -343,7 +380,8 @@ function fixAccountAmountOcr(s) {
     .replace(/\b[Il]00\b/g, '100')
     .replace(/\bO\.OO\b/gi, '0.00')
     .replace(/\bO\.00\b/gi, '0.00')
-    .replace(/\b0\.OO\b/gi, '0.00');
+    .replace(/\b0\.OO\b/gi, '0.00')
+    .replace(/\b\.([0-9]{1,2})(?=\s|$)/g, '0.$1');
 }
 
 function splitAccountDescriptionAndReference(body) {
@@ -378,9 +416,7 @@ function splitAccountDescriptionAndReference(body) {
     };
   }
 
-  // Cheque rows:
-  // Description: "I/W CLEARING CHEQUE ..."
-  // Ref: "000034"
+  // Cheque rows.
   m = text.match(/^(I\/W\s+CLEARING\s+CHEQUE.+?)\s+(\d{4,})$/i);
   if (m) {
     return {
@@ -389,10 +425,8 @@ function splitAccountDescriptionAndReference(body) {
     };
   }
 
-  // Purchases with long numeric reference:
-  // Description: "PUR 15/11 ADPAY ITC ABUDHABI 3342"
-  // Ref: "090235425319 ASMV"
-  m = text.match(/^(.*?\b3342)\s+(\d{8,}(?:\s+[A-Z0-9]+)*)$/i);
+  // Purchases with card/reference tail.
+  m = text.match(/^(.*?\b3342)\s+(\d{5,}(?:\s+[A-Z0-9]+)*)$/i);
   if (m) {
     return {
       description: normalizeSpaces(m[1]),
@@ -400,8 +434,7 @@ function splitAccountDescriptionAndReference(body) {
     };
   }
 
-  // ATM withdrawal rows with long DIB reference:
-  // Keep ATM text as description, put long numeric tail into reference.
+  // ATM withdrawal rows with long reference.
   m = text.match(/^(ATM\s+WDL.+?\bAE)\s+([A-Z0-9\s]{8,})$/i);
   if (m) {
     return {
@@ -410,8 +443,7 @@ function splitAccountDescriptionAndReference(body) {
     };
   }
 
-  // Send Money via Aani rows:
-  // Keep beneficiary line as description, move PHUB/P2P tail to reference where possible.
+  // Send Money via Aani rows.
   m = text.match(/^(Send\s+Money\s+via\s+Aani.+?)\s+((?:P2P|PHUB)[A-Z0-9\s]+)$/i);
   if (m) {
     return {
@@ -429,9 +461,7 @@ function splitAccountDescriptionAndReference(body) {
     };
   }
 
-  // Pure long-number rows:
-  // Description: first long transaction identifier
-  // Ref: remaining bank reference
+  // Pure long-number rows.
   m = text.match(/^(\d{12,})\s+(.+)$/i);
   if (m) {
     return {
@@ -440,25 +470,26 @@ function splitAccountDescriptionAndReference(body) {
     };
   }
 
-  // Generic fallback: keep full body as description.
-  // Do not guess too aggressively.
   return {
     description: text,
     reference: null,
   };
 }
 
-function parseAccountTable(text) {
+function accountRecordStartRegex() {
+  const datePat = '(?:\\d{1,2}[\\/\\-]\\d{1,2}[\\/\\-]\\d{4}|\\d{4}[\\/\\-]\\d{1,2}[\\/\\-]\\d{1,2})';
+  return new RegExp(`^${datePat}(?:\\s+\\d{1,2}:\\d{2}(?::\\d{2})?)?(?:\\s+${datePat})?\\b`);
+}
+
+function extractAccountRecords(text) {
   const rawLines = String(text || '')
     .split(/\n+/)
     .map(normalizeSpaces)
     .filter(Boolean);
 
-  const rows = [];
-  const datePat = '(?:\\d{1,2}[\\/\\-]\\d{1,2}[\\/\\-]\\d{4}|\\d{4}[\\/\\-]\\d{1,2}[\\/\\-]\\d{1,2})';
-
   const records = [];
   let current = [];
+  const startRe = accountRecordStartRegex();
 
   function flush() {
     if (current.length) {
@@ -470,9 +501,7 @@ function parseAccountTable(text) {
   for (const line of rawLines) {
     if (isNoiseLine(line)) continue;
 
-    const startsRecord = new RegExp(
-      `^${datePat}(?:\\s+\\d{1,2}:\\d{2}(?::\\d{2})?)?(?:\\s+${datePat})?\\b`
-    ).test(line);
+    const startsRecord = startRe.test(line);
 
     if (startsRecord) {
       flush();
@@ -483,90 +512,184 @@ function parseAccountTable(text) {
   }
 
   flush();
+  return records;
+}
 
-  for (const rec0 of records) {
-    const rec = normalizeSpaces(fixAccountAmountOcr(rec0));
-    if (!rec) continue;
+function extractNumsWithPosition(rest) {
+  const amountRe = new RegExp(`(^|\\s)(${NUM_SRC})(?=\\s|$)`, 'g');
+  const nums = [];
 
-    const dateMatches = [...rec.matchAll(new RegExp(datePat, 'g'))];
-    if (!dateMatches.length) continue;
+  for (const m of rest.matchAll(amountRe)) {
+    const prefix = m[1] || '';
+    const value = m[2];
+    const start = m.index + prefix.length;
+    const end = start + value.length;
 
-    const postingDateIso = isoFromAnyDate(dateMatches[0][0]);
-    if (!postingDateIso) continue;
+    nums.push({
+      value,
+      amount: parseAmount(value),
+      start,
+      end,
+    });
+  }
 
-    let rest = rec.slice(dateMatches[0].index + dateMatches[0][0].length).trim();
+  return nums;
+}
 
-    // Remove posting time.
-    rest = rest.replace(/^\d{1,2}:\d{2}(?::\d{2})?\s+/, '').trim();
+function parseAccountRecord(rec0) {
+  const datePat = '(?:\\d{1,2}[\\/\\-]\\d{1,2}[\\/\\-]\\d{4}|\\d{4}[\\/\\-]\\d{1,2}[\\/\\-]\\d{1,2})';
 
-    // Remove value date if present.
-    const secondDate = rest.match(new RegExp(`^(${datePat})\\b`));
-    if (secondDate) {
-      rest = rest.slice(secondDate[0].length).trim();
-    }
+  const rec = normalizeSpaces(fixAccountAmountOcr(rec0));
+  if (!rec) return null;
 
-    const amountRe = new RegExp(`(^|\\s)(${NUM_SRC})(?=\\s|$)`, 'g');
-    const nums = [];
+  const dateMatches = [...rec.matchAll(new RegExp(datePat, 'g'))];
+  if (!dateMatches.length) return null;
 
-    for (const m of rest.matchAll(amountRe)) {
-      const prefix = m[1] || '';
-      const value = m[2];
-      const start = m.index + prefix.length;
-      const end = start + value.length;
+  const postingDateIso = isoFromAnyDate(dateMatches[0][0]);
+  if (!postingDateIso) return null;
 
-      nums.push({
-        value,
-        start,
-        end,
-      });
-    }
+  let rest = rec.slice(dateMatches[0].index + dateMatches[0][0].length).trim();
 
-    // Account table requires Debit, Credit, Balance at the end.
-    // If this cannot be proven, skip the row. Do not guess.
-    if (nums.length < 3) continue;
+  // Remove posting time.
+  rest = rest.replace(/^\d{1,2}:\d{2}(?::\d{2})?\s+/, '').trim();
 
-    // HARD RULE:
-    // Last number = Balance. Completely discard it.
-    // Previous two numbers = Debit Amount and Credit Amount.
-    const debitToken = nums[nums.length - 3];
-    const creditToken = nums[nums.length - 2];
+  // Remove value date if present.
+  const secondDate = rest.match(new RegExp(`^(${datePat})\\b`));
+  if (secondDate) {
+    rest = rest.slice(secondDate[0].length).trim();
+  }
 
-    const debit = parseAmount(debitToken.value);
-    const credit = parseAmount(creditToken.value);
+  const nums = extractNumsWithPosition(rest);
 
-    let amount = 0;
-    let direction = null;
+  // Account table requires Debit, Credit, Balance.
+  if (nums.length < 3) return null;
 
-    if (debit > 0 && credit === 0) {
-      amount = debit;
-      direction = 'DR';
-    } else if (credit > 0 && debit === 0) {
-      amount = credit;
-      direction = 'CR';
-    } else {
-      // Both zero or both positive means ambiguous.
-      // Skip instead of risking wrong totals.
+  // Default table rule:
+  // Last number = Balance.
+  // Previous two numbers = Debit and Credit.
+  const debitToken = nums[nums.length - 3];
+  const creditToken = nums[nums.length - 2];
+  const balanceToken = nums[nums.length - 1];
+
+  const debit = debitToken.amount;
+  const credit = creditToken.amount;
+  const balance = balanceToken.amount;
+
+  let amount = 0;
+  let direction = null;
+
+  if (debit > 0 && credit === 0) {
+    amount = debit;
+    direction = 'DR';
+  } else if (credit > 0 && debit === 0) {
+    amount = credit;
+    direction = 'CR';
+  } else {
+    return null;
+  }
+
+  const body = normalizeSpaces(rest.slice(0, debitToken.start));
+  const split = splitAccountDescriptionAndReference(body);
+
+  if (!split.description || split.description.length < 2) return null;
+
+  return {
+    date: postingDateIso,
+    merchant: split.description,
+    reference: split.reference,
+    amount,
+    direction,
+    debit,
+    credit,
+    balance,
+    raw: rec,
+    validation: {
+      balance_check: 'pending',
+      balance_used_as_amount: false,
+    },
+  };
+}
+
+function validateRunningBalances(parsed) {
+  if (!parsed.length) return parsed;
+
+  // Account statements are often reverse chronological.
+  // For two adjacent rows in display order:
+  // olderBalance should equal newerBalance + newerDebit - newerCredit.
+  const tolerance = 0.05;
+
+  for (let i = 0; i < parsed.length; i++) {
+    const cur = parsed[i];
+
+    if (!cur.validation) cur.validation = {};
+
+    cur.validation.balance_check = 'not_checked';
+
+    if (cur.balance == null || !Number.isFinite(Number(cur.balance))) {
+      cur.validation.balance_check = 'missing_balance';
       continue;
     }
 
-    if (!direction || amount <= 0) continue;
+    const nextOlder = parsed[i + 1];
 
-    // Everything before Debit Amount is Description + Ref/Cheque No.
-    const body = normalizeSpaces(rest.slice(0, debitToken.start));
-    const split = splitAccountDescriptionAndReference(body);
+    if (!nextOlder || nextOlder.balance == null || !Number.isFinite(Number(nextOlder.balance))) {
+      cur.validation.balance_check = 'edge_row';
+      continue;
+    }
 
-    if (!split.description || split.description.length < 2) continue;
+    const expectedOlderBalance =
+      Number(cur.balance) + Number(cur.debit || 0) - Number(cur.credit || 0);
 
-    rows.push(makeTxn({
-      date: postingDateIso,
-      merchant: split.description,
-      reference: split.reference,
-      amount,
-      direction,
-      parser: 'account_table',
-      raw: rec,
-    }));
+    const diff = Math.abs(expectedOlderBalance - Number(nextOlder.balance));
+
+    if (diff <= tolerance) {
+      cur.validation.balance_check = 'passed_reverse_order';
+      cur.validation.balance_diff = Math.round(diff * 100) / 100;
+    } else {
+      // Also check chronological direction just in case rows are ascending.
+      const expectedCurrentBalance =
+        Number(nextOlder.balance) - Number(cur.debit || 0) + Number(cur.credit || 0);
+
+      const diff2 = Math.abs(expectedCurrentBalance - Number(cur.balance));
+
+      if (diff2 <= tolerance) {
+        cur.validation.balance_check = 'passed_forward_order';
+        cur.validation.balance_diff = Math.round(diff2 * 100) / 100;
+      } else {
+        cur.validation.balance_check = 'failed';
+        cur.validation.balance_diff = Math.round(Math.min(diff, diff2) * 100) / 100;
+      }
+    }
   }
+
+  return parsed;
+}
+
+function parseAccountTable(text) {
+  const records = extractAccountRecords(text);
+  const parsed = [];
+
+  for (const rec of records) {
+    const row = parseAccountRecord(rec);
+    if (row) parsed.push(row);
+  }
+
+  validateRunningBalances(parsed);
+
+  const rows = parsed.map(r => makeTxn({
+    date: r.date,
+    merchant: r.merchant,
+    reference: r.reference,
+    amount: r.amount,
+    direction: r.direction,
+    parser: 'account_table',
+    statement_type: 'bank_account',
+    raw: r.raw,
+    debit: r.debit,
+    credit: r.credit,
+    balance: r.balance,
+    validation: r.validation,
+  }));
 
   return compactRows(rows);
 }
@@ -599,6 +722,7 @@ function parseSignedAmountRows(text) {
       amount: signed.amount,
       direction: signed.isNegative ? 'DR' : 'CR',
       parser: 'signed_amount',
+      statement_type: 'generic',
       raw: line,
     }));
   }
@@ -692,6 +816,7 @@ function parseCsvLike(text) {
       amount,
       direction,
       parser: 'csv_like',
+      statement_type: 'csv',
       raw: line,
     }));
   }
@@ -721,6 +846,7 @@ function parsePayslip(text) {
       amount: parseAmount(net[1]),
       direction: 'CR',
       parser: 'payslip',
+      statement_type: 'payslip',
       raw: 'Net Pay',
     }),
   ]);
@@ -872,6 +998,13 @@ function makeParseReport({ filename, parser, rows, cleaned, candidates, warning 
   const extracted = rows.length;
   const rejected = Math.max(0, candidate.count - extracted);
 
+  const validationSummary = {
+    balance_passed: rows.filter(r => r.validation && String(r.validation.balance_check || '').startsWith('passed')).length,
+    balance_failed: rows.filter(r => r.validation && r.validation.balance_check === 'failed').length,
+    balance_not_checked: rows.filter(r => r.validation && ['pending', 'not_checked', 'edge_row', 'missing_balance'].includes(r.validation.balance_check)).length,
+    balance_used_as_amount: rows.filter(r => r.validation && r.validation.balance_used_as_amount === true).length,
+  };
+
   let confidence = 0;
 
   if (extracted > 0) {
@@ -882,11 +1015,15 @@ function makeParseReport({ filename, parser, rows, cleaned, candidates, warning 
     if (/generic|signed|csv/i.test(parser || '')) {
       confidence = Math.max(0.62, confidence - 0.08);
     }
+
+    if (validationSummary.balance_failed > 0) {
+      confidence = Math.max(0.55, confidence - 0.15);
+    }
   }
 
   const status = extracted === 0
     ? 'failed'
-    : confidence >= 0.95
+    : confidence >= 0.95 && validationSummary.balance_failed === 0
       ? 'ok'
       : 'review';
 
@@ -898,6 +1035,10 @@ function makeParseReport({ filename, parser, rows, cleaned, candidates, warning 
     warnings.push('No transaction rows were extracted. This format may need OCR or another parser.');
   } else if (status !== 'ok') {
     warnings.push(`Extracted ${extracted} transaction rows against ${candidate.count} estimated transaction-table candidate rows. Review recommended.`);
+  }
+
+  if (validationSummary.balance_failed > 0) {
+    warnings.push(`${validationSummary.balance_failed} account-statement row(s) failed running-balance validation.`);
   }
 
   if (qualityScope === 'full_text_fallback') {
@@ -915,6 +1056,7 @@ function makeParseReport({ filename, parser, rows, cleaned, candidates, warning 
     quality_scope: qualityScope,
     quality_note: qualityNote,
     table_region_detected: tableRegion.found,
+    validation_summary: validationSummary,
     parser_scores: (candidates || []).map(c => ({
       parser: c.name,
       rows: c.rows.length,
@@ -928,21 +1070,26 @@ function makeParseReport({ filename, parser, rows, cleaned, candidates, warning 
 function deterministicExtract(text, filename = null) {
   const cleaned = cleanStatementText(text);
   const isBankAccount = looksLikeBankAccountStatement(cleaned);
+  const isCreditCard = looksLikeCreditCardStatement(cleaned);
+
+  const accountRows = parseAccountTable(cleaned);
+  const cardRows = parseTwoDateCard(cleaned);
 
   const candidates = [
     { name: 'csv_like', rows: parseCsvLike(cleaned) },
     { name: 'tagged_single_date', rows: parseTaggedSingleDate(cleaned) },
-    { name: 'two_date_card', rows: parseTwoDateCard(cleaned) },
-    { name: 'account_table', rows: parseAccountTable(cleaned) },
+    { name: 'two_date_card', rows: cardRows },
+    { name: 'account_table', rows: accountRows },
     { name: 'signed_amount', rows: parseSignedAmountRows(cleaned) },
     { name: 'payslip', rows: parsePayslip(cleaned) },
   ];
 
-  let best;
+  let best = null;
 
-  if (isBankAccount) {
-    const accountCandidate = candidates.find(c => c.name === 'account_table');
-    best = accountCandidate && accountCandidate.rows.length > 0 ? accountCandidate : null;
+  if (isBankAccount && accountRows.length > 0) {
+    best = { name: 'account_table', rows: accountRows };
+  } else if (isCreditCard && cardRows.length > 0) {
+    best = { name: 'two_date_card', rows: cardRows };
   }
 
   if (!best) {
@@ -1106,7 +1253,7 @@ async function handleExtract(req, res) {
   const summary = summarizeTransactions(rows);
 
   const response = {
-    backend_version: 'strict-account-table-v7-exact-description-no-balance',
+    backend_version: BACKEND_VERSION,
     transactions: rows,
     count: rows.length,
     filename: filename || null,
