@@ -16,7 +16,102 @@ const INSIGHT_TIMEOUT_MS = 18000;
 const MAX_TOTAL_CHARS = 900000;
 const REJECT_ABOVE_CHARS = 1400000;
 
-const BACKEND_VERSION = 'strict-account-table-v9-phantom-zero-fix';
+const BACKEND_VERSION = 'strict-account-table-v11-ai-account-parser';
+
+// Prompt sent to Claude Haiku to parse ADCB Islamic account statement rows.
+// The raw text from these PDFs has spatial extraction artefacts: timestamps
+// bleed into numbers, column order is scrambled, amounts are sometimes 10x wrong.
+// Claude reads the semantic meaning of each row rather than relying on position.
+const ACCOUNT_PARSE_PROMPT = `You are parsing rows from an ADCB Islamic bank account statement (UAE).
+Each row was extracted from a PDF by a spatial text sorter and may contain:
+- Two dates (posting date and value date) in DD/MM/YYYY format
+- A timestamp like 03:39:59 that is NOT part of the transaction amount
+- A description and reference number
+- A debit amount, a credit amount (one will be zero), and a running balance
+- Trailing reference codes or continuation text
+
+The PDF extraction is corrupted: amounts sometimes have a phantom '0' inserted before the decimal point (e.g. "43320.93" means 4332.93, "92780.93" means 9278.93, "302740.2" means 30274.2). The balance column also suffers the same corruption. Timestamps like "03:39:59" are NOT amounts.
+
+For each row, identify:
+1. The posting date (first date, YYYY-MM-DD format)
+2. Whether it is DR (debit, money out) or CR (credit, money in) — look at the description semantics: SALARY/CHEQUE DEPOSIT/B/O/MBTRF B/O/dividend = CR; ATM WDL/PUR/MBTRF AED TRF OUT/Installment Recovery/CREDIT CARD PAYMNT/FOREIGN TRANSACTION FEE/SEND MONEY = DR
+3. The transaction amount (not the balance) — correct phantom zeros: if a decimal number has a '0' immediately before the decimal point AND the result makes more sense as a transaction amount, remove it
+4. The description (exclude dates, timestamps, reference numbers, and amounts)
+
+Return ONLY a JSON array, one object per input row, in the same order:
+[{"date":"YYYY-MM-DD","direction":"DR"|"CR","amount":number,"description":"string"},...]
+
+If a row cannot be parsed, include it as null in the array. No explanation.`;
+
+// Parse ADCB account statement records using Claude Haiku.
+// Records are the assembled text lines (one per transaction) from extractAccountRecords.
+// Returns an array of parsed row objects matching the makeTxn signature.
+async function parseAccountTableWithAI(records, apiKey, timeoutMs = 50000) {
+  if (!records.length || !apiKey) return [];
+
+  // Batch records into chunks to stay within token limits (~40 rows per call)
+  const CHUNK = 40;
+  const allRows = [];
+
+  for (let i = 0; i < records.length; i += CHUNK) {
+    const chunk = records.slice(i, i + CHUNK);
+    // Send as numbered list so Claude can return results in order
+    const userContent = chunk.map((r, idx) => `${idx + 1}. ${r}`).join('\n');
+
+    let raw;
+    try {
+      raw = await callClaude({
+        prompt: ACCOUNT_PARSE_PROMPT,
+        userContent,
+        apiKey,
+        maxTokens: 2000,
+        timeoutMs,
+      });
+    } catch (err) {
+      console.error('AI account parse error:', err.message);
+      // On failure push nulls so the chunk is accounted for
+      for (let j = 0; j < chunk.length; j++) allRows.push(null);
+      continue;
+    }
+
+    // Parse the JSON array response
+    let parsed = null;
+    try {
+      const clean = String(raw).replace(/```json|```/g, '').trim();
+      const s = clean.indexOf('[');
+      const e = clean.lastIndexOf(']');
+      if (s >= 0 && e > s) parsed = JSON.parse(clean.slice(s, e + 1));
+    } catch {
+      parsed = null;
+    }
+
+    if (!Array.isArray(parsed)) {
+      for (let j = 0; j < chunk.length; j++) allRows.push(null);
+      continue;
+    }
+
+    // Map each parsed result to a transaction object
+    for (let j = 0; j < chunk.length; j++) {
+      const p = parsed[j];
+      if (!p || typeof p !== 'object') { allRows.push(null); continue; }
+
+      const txn = makeTxn({
+        date:           p.date || null,
+        merchant:       p.description || 'Unknown',
+        amount:         Number(p.amount) || 0,
+        direction:      p.direction === 'CR' ? 'CR' : 'DR',
+        currency:       'AED',
+        parser:         'account_table_ai',
+        statement_type: 'bank_account',
+        raw:            chunk[j],
+      });
+
+      allRows.push(txn || null);
+    }
+  }
+
+  return allRows.filter(Boolean);
+}
 
 const NUM_SRC = String.raw`-?\(?\d{1,3}(?:,\d{3})*(?:\.\d+)?\)?|-?\(?\d+(?:\.\d+)?\)?|\.\d+`;
 
@@ -553,17 +648,24 @@ function extractNumsWithPosition(rest) {
 // Remove a phantom '0' digit that pdf.js spatial extraction inserts immediately
 // before the decimal point in ADCB Islamic account statement amounts.
 // The corruption is a literal character insertion: "4332.93" becomes "43320.93",
-// "9278.93" becomes "92780.93". Removing the '0' just left of the decimal restores
-// the correct value when the remaining integer part has 2+ digits (to avoid modifying
-// genuine zero-ending decimals like "10.50" which would not appear in this statement).
-// Applied to amounts and balances after extraction; integers are left unchanged.
+// "9278.93" becomes "92780.93", "34.84" becomes "340.84".
+// Condition: the number must have 2+ integer digits before the phantom '0',
+// and the decimal part must be non-zero (integers like 4900 are unaffected).
 function removePhantomZero(n) {
-  const s = String(Math.round(n * 100) / 100);
-  // Match: 2+ digits, then '0', then '.', then digits
+  // Use full precision string to avoid float rounding artefacts
+  const s = n.toFixed(10).replace(/\.?0+$/, '');
   const m = s.match(/^(\d{2,})0\.(\d+)$/);
-  if (m) return parseFloat(m[1] + '.' + m[2]);
+  if (m && parseInt(m[2], 10) > 0) return parseFloat(m[1] + '.' + m[2]);
   return n;
 }
+
+// Description patterns that force direction in ADCB account statements.
+// SALARY and CHEQUE DEPOSIT rows always have credit=nonzero, debit=0,
+// but their sequence/cheque reference numbers appear before "00.00" in the
+// extracted text, which fools the zero-anchor logic into treating them as DR rows.
+// B/O (beneficiary-of) entries are always credits regardless of leading digits.
+const ACCT_FORCE_CR = /\b(SALARY|CHEQUE\s+DEPOSIT|B\/O\s)/i;
+const ACCT_FORCE_DR = /^(ATM\s+WDL|PUR\s|FOREIGN\s+TRANSACTION|SEND\s+MONEY\s+VIA\s+AANI|I\/W\s+CLEARING\s+CHEQUE)/i;
 
 function parseAccountRecord(rec0) {
   const datePat = '(?:\\d{1,2}[\\/\\-]\\d{1,2}[\\/\\-]\\d{4}|\\d{4}[\\/\\-]\\d{1,2}[\\/\\-]\\d{1,2})';
@@ -571,9 +673,8 @@ function parseAccountRecord(rec0) {
   // Strip HH:MM:SS and HH:MM time tokens before any processing.
   // ADCB Islamic account statement PDFs embed a timestamp column (e.g. 03:39:59)
   // in each row. pdf.js spatial extraction merges these into the same text line as
-  // the amount columns, and the timestamp digits bleed into adjacent numbers making
-  // them appear ~10x too large. Stripping them here (after the frontend also strips
-  // them) is the second line of defence.
+  // the amount columns. Stripping them here is the second line of defence after
+  // the frontend filter.
   const rec = normalizeSpaces(fixAccountAmountOcr(
     String(rec0 || '').replace(/\b\d{1,2}:\d{2}(:\d{2})?\b/g, ' ')
   ));
@@ -594,52 +695,74 @@ function parseAccountRecord(rec0) {
     rest = rest.slice(secondDate[0].length).trim();
   }
 
-  const nums = extractNumsWithPosition(rest);
+  // Use zero-marker anchoring instead of last-3-numbers.
+  // The ADCB account statement columns are: Description | Ref | Debit | Credit | Balance
+  // The zero marker (00.00) is always the empty column (Credit=0 for DR, Debit=0 for CR).
+  // Numbers before zero = debit (for DR rows); numbers after zero = credit then balance (for CR).
+  // Trailing reference codes after the balance are filtered out by the is_ref check below.
+  const zeroMarker = rest.match(/(?<![.\d])(0+\.00)(?![.\d])/);
+  if (!zeroMarker) return null;
 
-  // Account table requires at least Debit, Credit, Balance (3 numbers).
-  if (nums.length < 3) return null;
+  const zeroIdx  = zeroMarker.index;
+  const afterIdx = zeroIdx + zeroMarker[0].length;
+  const beforeStr = rest.slice(0, zeroIdx).trim();
+  const afterStr  = rest.slice(afterIdx).trim();
 
-  // Default table rule:
-  // Last number = Balance.
-  // Previous two = Debit and Credit (exactly one of them is 0).
-  const debitToken = nums[nums.length - 3];
-  const creditToken = nums[nums.length - 2];
-  const balanceToken = nums[nums.length - 1];
-
-  const debit = debitToken.amount;
-  const credit = creditToken.amount;
-  const balance = balanceToken.amount;
-
-  let amount = 0;
-  let direction = null;
-
-  if (debit > 0 && credit === 0) {
-    // Apply phantom-zero fix: ADCB Islamic PDFs sometimes have a spurious '0'
-    // inserted before the decimal point (e.g. "43320.93" → "4332.93").
-    amount = removePhantomZero(debit);
-    direction = 'DR';
-  } else if (credit > 0 && debit === 0) {
-    amount = removePhantomZero(credit);
-    direction = 'CR';
-  } else {
-    // Neither or both are zero — can't determine direction reliably.
-    return null;
+  // Extract standalone non-reference numbers from a string.
+  // Bank reference numbers are large integers (>= 1,000,000); filter them out.
+  function extractAmountNums(s) {
+    const amountRe = new RegExp(`(^|\\s)(${NUM_SRC})(?=\\s|$)`, 'g');
+    const out = [];
+    for (const m of s.matchAll(amountRe)) {
+      const v = parseAmount(m[2]);
+      const isRef = v >= 1_000_000 && Number.isInteger(v);
+      if (!isRef) out.push({ raw: m[2], amount: v, start: m.index + m[1].length });
+    }
+    return out;
   }
 
-  const body = normalizeSpaces(rest.slice(0, debitToken.start));
-  const split = splitAccountDescriptionAndReference(body);
+  const beforeNums = extractAmountNums(beforeStr);
+  const afterNums  = extractAmountNums(afterStr);
 
+  // Determine direction using description pattern overrides first,
+  // then fall back to zero-anchor position logic.
+  const forceCR = ACCT_FORCE_CR.test(beforeStr);
+  const forceDR = ACCT_FORCE_DR.test(beforeStr);
+
+  let amount, direction, body, balanceRaw;
+
+  if (forceCR || (!forceDR && beforeNums.length === 0)) {
+    // CR row: amount is first non-ref number after zero
+    if (afterNums.length === 0) return null;
+    amount    = removePhantomZero(afterNums[0].amount);
+    direction = 'CR';
+    body      = beforeStr;
+    balanceRaw = afterNums.length > 1 ? removePhantomZero(afterNums[1].amount) : null;
+  } else {
+    // DR row: amount is last non-ref number before zero
+    if (beforeNums.length === 0) return null;
+    const debitToken = beforeNums[beforeNums.length - 1];
+    amount    = removePhantomZero(debitToken.amount);
+    direction = 'DR';
+    const pos = beforeStr.lastIndexOf(debitToken.raw, debitToken.start + debitToken.raw.length);
+    body      = normalizeSpaces(beforeStr.slice(0, pos >= 0 ? pos : beforeStr.length));
+    balanceRaw = afterNums.length > 0 ? removePhantomZero(afterNums[0].amount) : null;
+  }
+
+  if (!amount || amount <= 0) return null;
+
+  const split = splitAccountDescriptionAndReference(body);
   if (!split.description || split.description.length < 2) return null;
 
   return {
     date: postingDateIso,
     merchant: split.description,
     reference: split.reference,
-    amount,
+    amount: Math.round(amount * 100) / 100,
     direction,
-    debit: direction === 'DR' ? amount : 0,
-    credit: direction === 'CR' ? amount : 0,
-    balance: removePhantomZero(balance),
+    debit:   direction === 'DR' ? Math.round(amount * 100) / 100 : 0,
+    credit:  direction === 'CR' ? Math.round(amount * 100) / 100 : 0,
+    balance: balanceRaw != null ? Math.round(balanceRaw * 100) / 100 : null,
     raw: rec,
     validation: {
       balance_check: 'pending',
@@ -1101,12 +1224,26 @@ function makeParseReport({ filename, parser, rows, cleaned, candidates, warning 
   };
 }
 
-function deterministicExtract(text, filename = null) {
+async function deterministicExtract(text, filename = null, apiKey = null) {
   const cleaned = cleanStatementText(text);
   const isBankAccount = looksLikeBankAccountStatement(cleaned);
   const isCreditCard = looksLikeCreditCardStatement(cleaned);
 
-  const accountRows = parseAccountTable(cleaned);
+  // For bank account statements: use the AI-powered parser which can handle
+  // the ADCB Islamic PDF spatial extraction artefacts that defeat regex approaches.
+  // Fall back to the deterministic account_table parser if AI is unavailable.
+  let accountRows = [];
+  if (isBankAccount) {
+    if (apiKey) {
+      const records = extractAccountRecords(cleaned);
+      accountRows = await parseAccountTableWithAI(records, apiKey);
+    }
+    // Fall back to deterministic parser if AI returned nothing
+    if (accountRows.length === 0) {
+      accountRows = parseAccountTable(cleaned);
+    }
+  }
+
   const cardRows = parseTwoDateCard(cleaned);
 
   const candidates = [
@@ -1147,8 +1284,8 @@ function deterministicExtract(text, filename = null) {
     rows,
     cleaned,
     candidates,
-    warning: isBankAccount && parser !== 'account_table'
-      ? 'Bank account statement detected, but account_table parser did not win. Review required.'
+    warning: isBankAccount && accountRows.length === 0
+      ? 'Bank account statement detected but no rows extracted. AI parser unavailable or returned no results.'
       : null,
   });
 
@@ -1256,7 +1393,7 @@ function parseJsonObject(raw) {
   }
 }
 
-async function handleExtract(req, res) {
+async function handleExtract(req, res, apiKey) {
   const { text, filename } = req.body || {};
 
   if (!text || typeof text !== 'string') {
@@ -1283,7 +1420,7 @@ async function handleExtract(req, res) {
     wasTruncated = true;
   }
 
-  const { parser, rows, cleaned, parse_report } = deterministicExtract(input, filename);
+  const { parser, rows, cleaned, parse_report } = await deterministicExtract(input, filename, apiKey);
   const summary = summarizeTransactions(rows);
 
   const response = {
@@ -1374,7 +1511,7 @@ export default async function handler(req, res) {
     const action = req.body?.action;
 
     if (action === 'extract') {
-      return await handleExtract(req, res);
+      return await handleExtract(req, res, apiKey);
     }
 
     if (action === 'insight') {
