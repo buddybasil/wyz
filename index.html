@@ -1,956 +1,923 @@
-<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8" />
-<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1" />
-<title>Wyz - Know Your Money</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+// WYZ API - Generic Statement Analyzer
+// Strict version:
+// - Credit-card statements: parses date / description / DR-CR / amount.
+// - Bank-account statements: parses Debit Amount and Credit Amount only.
+// - The right-most account-statement number is treated as Balance and discarded.
+// - Balance is NEVER used as transaction amount.
+// - CR -> income unless ignored.
+// - DR -> expenses unless ignored.
+// - Internal/self/card-payment/uncertain incoming transfers are excluded from P/L.
+// - Claude is only used for optional insight generation, never for extraction.
 
-<style>
-:root{
-  --bg:#f7f6f2;
-  --card:#fff;
-  --ink:#171411;
-  --muted:#756f68;
-  --line:#e7e0d7;
-  --green:#0d8a53;
-  --red:#c0392b;
-  --amber:#9a6500;
-  --soft:#faf7f1;
-  --shadow:0 12px 28px rgba(0,0,0,.07);
-  --blue:#1f6fff;
-  --purple:#7d4cff;
-  --r:20px;
+const MODEL = 'claude-haiku-4-5-20251001';
+const INSIGHT_MAX_TOKENS = 450;
+const INSIGHT_TIMEOUT_MS = 18000;
+const MAX_TOTAL_CHARS = 900000;
+const REJECT_ABOVE_CHARS = 1400000;
+
+const NUM_SRC = String.raw`-?\(?\d{1,3}(?:,\d{3})*(?:\.\d+)?\)?|-?\(?\d+(?:\.\d+)?\)?|\.\d+`;
+
+function setCors(res) {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 }
 
-*{box-sizing:border-box}
-
-body{
-  margin:0;
-  background:var(--bg);
-  color:var(--ink);
-  font-family:'DM Sans',system-ui,-apple-system,Segoe UI,sans-serif;
+function normalizeSpaces(s) {
+  return String(s || '')
+    .replace(/[\u200B-\u200D\uFEFF]/g, '')
+    .replace(/\uFFFE/g, '')
+    .replace(/\uFFFD/g, '')
+    .replace(/\uFFFC/g, '')
+    .replace(/[ \t]+/g, ' ')
+    .replace(/\s+([,.:;])/g, '$1')
+    .trim();
 }
 
-.top{
-  height:76px;
-  background:var(--card);
-  border-bottom:1px solid var(--line);
-  display:flex;
-  align-items:center;
-  justify-content:space-between;
-  padding:0 28px;
-  position:sticky;
-  top:0;
-  z-index:5;
+function cleanStatementText(text) {
+  if (!text) return '';
+
+  let t = String(text).replace(/\r/g, '\n');
+
+  t = t.replace(
+    /[\u0590-\u05FF\u0600-\u06FF\u0700-\u074F\u0750-\u077F\u0780-\u07BF\u08A0-\u08FF\u0900-\u097F\uFB50-\uFDFF\uFE70-\uFEFF]/g,
+    ' '
+  );
+
+  t = t.replace(/General Terms and Important Information[\s\S]*$/i, '');
+  t = t.replace(/Terms\s+(and|&)\s+Conditions[\s\S]{200,}$/i, '');
+  t = t.replace(/Important (Information|Notice|Disclaimer)[\s\S]{200,}$/i, '');
+  t = t.replace(/\*{3,}\s*END\s*OF\s*STATEMENT\s*\*{3,}/gi, '\n******* END OF STATEMENT *******\n');
+  t = t.replace(/https?:\/\/\S+/g, ' ');
+  t = t.replace(/[\w.-]+@[\w.-]+\.\w+/g, ' ');
+  t = t.replace(/[ \t]+/g, ' ');
+  t = t.replace(/\n{3,}/g, '\n\n');
+
+  return t.trim();
 }
 
-.brand{
-  display:flex;
-  gap:12px;
-  align-items:center;
-  font-weight:800;
-  font-size:22px;
+function parseAmount(v) {
+  if (v == null) return 0;
+
+  const cleaned = String(v)
+    .replace(/,/g, '')
+    .replace(/[^\d.\-()[\]]/g, '');
+
+  const n = Number(cleaned.replace(/[()[\]]/g, '').replace(/^-/, ''));
+
+  return Number.isFinite(n) ? Math.abs(n) : 0;
 }
 
-.logo{
-  width:38px;
-  height:38px;
-  border-radius:12px;
-  background:#161412;
-  color:white;
-  display:grid;
-  place-items:center;
+function parseSignedAmount(v) {
+  const raw = String(v || '').trim();
+
+  return {
+    amount: parseAmount(raw),
+    isNegative: /^-/.test(raw) || /^\(.*\)$/.test(raw),
+  };
 }
 
-.pill{
-  padding:7px 12px;
-  border:1px solid #b6e5c9;
-  background:#ecfff4;
-  color:#087644;
-  border-radius:999px;
-  font-weight:700;
-  font-size:13px;
+function isoFromAnyDate(s) {
+  const raw = String(s || '').trim();
+
+  let m = raw.match(/^(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})$/);
+  if (m) return `${m[1]}-${m[2].padStart(2, '0')}-${m[3].padStart(2, '0')}`;
+
+  m = raw.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);
+  if (!m) return null;
+
+  const a = Number(m[1]);
+  const b = Number(m[2]);
+
+  // Default to DD/MM/YYYY for UAE-style statements.
+  // If second part cannot be a month, assume MM/DD/YYYY.
+  if (b > 12 && a <= 12) {
+    return `${m[3]}-${String(a).padStart(2, '0')}-${String(b).padStart(2, '0')}`;
+  }
+
+  return `${m[3]}-${String(b).padStart(2, '0')}-${String(a).padStart(2, '0')}`;
 }
 
-.wrap{
-  max-width:1160px;
-  margin:0 auto;
-  padding:34px 22px 70px;
+function amountTokenRegex() {
+  return new RegExp(`(?:${NUM_SRC})`, 'g');
 }
 
-.hero{
-  display:grid;
-  grid-template-columns:1.1fr .9fr;
-  gap:24px;
-  align-items:start;
+function isNoiseLine(line) {
+  const l = String(line || '').toLowerCase();
+
+  return !line ||
+    l.includes('transaction date description') ||
+    (l.includes('transaction date') && l.includes('amount')) ||
+    l.includes('posting date value date description') ||
+    l.includes('primary card number') ||
+    l.includes('card holder name') ||
+    l.includes('credit card statement') ||
+    l.includes('statement of account') ||
+    l.includes('statement period') ||
+    l.includes('opening balance') ||
+    l.includes('closing balance') ||
+    l.includes('current balance') ||
+    l.includes('minimum amount due') ||
+    l.includes('total amount due') ||
+    l.includes('total outstanding balance') ||
+    l.includes('credit limit') ||
+    l.includes('available credit') ||
+    l.includes('licensed by the central bank') ||
+    l.includes('commercial bank of dubai psc') ||
+    l.includes('end_of_statement') ||
+    /^\*{3,}/.test(line);
 }
 
-.card{
-  background:var(--card);
-  border:1px solid var(--line);
-  border-radius:var(--r);
-  box-shadow:var(--shadow);
+function looksLikeBankAccountStatement(text) {
+  const s = String(text || '').toUpperCase();
+
+  const hasAccountHeader =
+    /ACCOUNT\s+STATEMENT/.test(s) ||
+    /ACCOUNT\s+NUMBER/.test(s) ||
+    /ACCOUNT\s+NAME/.test(s);
+
+  const hasBankColumns =
+    /POSTING\s+DATE/.test(s) &&
+    /VALUE\s+DATE/.test(s) &&
+    /DEBIT\s+AMOUNT/.test(s) &&
+    /CREDIT\s+AMOUNT/.test(s) &&
+    /BALANCE/.test(s);
+
+  return hasAccountHeader && hasBankColumns;
 }
 
-.upload{padding:28px}
-.upload h1{font-size:30px;margin:0 0 8px}
-.upload p{color:var(--muted);margin:0 0 22px;line-height:1.55}
+function isInternalTransferLike(t) {
+  const m = String(t.merchant || '').toUpperCase();
 
-.drop{
-  border:2px dashed #d8d1ca;
-  border-radius:18px;
-  padding:36px;
-  text-align:center;
-  background:#fff;
-  cursor:pointer;
+  // Credit-card settlements/payments.
+  if (
+    /PAYMENT\s*RECEIVED/.test(m) ||
+    /PAYMENTRECEIVED/.test(m) ||
+    /CREDIT\s*CARD\s*PAYMNT/.test(m) ||
+    /CREDIT\s*CARD\s*PAYMENT/.test(m) ||
+    /CARD\s*PAYMENT/.test(m) ||
+    /PAYMENT\s*TO\s*CARD/.test(m)
+  ) {
+    return true;
+  }
+
+  // Self/family/person-to-person transfers.
+  if (
+    /\bTRF\s*OUT\s*TO\s+BASIL\s+ABRAHAM\b/.test(m) ||
+    /\bTRF\s*OUT\s*TO\s+BASIL\b/.test(m) ||
+    /\bTRF\s*OUT\s*TO\s+SEENA\s+BASIL\b/.test(m) ||
+    /\bTRF\s*OUT\s*TO\s+SEENA\b/.test(m) ||
+    /\bB\/O\s+BASIL\s+ABRAHAM\b/.test(m) ||
+    /\bB\/O\s+BASIL\b/.test(m) ||
+    /\bB\/O\s+SEENA\s+BASIL\b/.test(m) ||
+    /\bB\/O\s+SEENA\b/.test(m) ||
+    /\bSEND\s+MONEY\s+VIA\s+AANI\b/.test(m)
+  ) {
+    return true;
+  }
+
+  // Uncertain incoming credits: ignore first; user can manually move to Income after review.
+  if (
+    /\bB\/O\s+ALLIANCE\s+INSURANCE\b/.test(m) ||
+    /\bALLIANCE\s+INSURANCE\b/.test(m)
+  ) {
+    return true;
+  }
+
+  return false;
 }
 
-.drop:hover{
-  border-color:#222;
-  background:#fffdf8;
+function categorizeTxn(t) {
+  const out = { ...t };
+
+  if (isInternalTransferLike(out)) {
+    out.cat = 'internal_transfer';
+    out.sub = 'ignored';
+    out.type = 'card_or_internal_payment';
+    out.freq = 'adhoc';
+    out.excluded_from_pl = true;
+    return out;
+  }
+
+  if (out.direction === 'CR') {
+    out.cat = 'income';
+    out.sub = 'uncategorised';
+    out.type = 'credit';
+    out.freq = 'adhoc';
+    out.excluded_from_pl = false;
+    return out;
+  }
+
+  out.cat = 'expenses';
+  out.sub = 'uncategorised';
+  out.type = 'debit';
+  out.freq = 'adhoc';
+  out.excluded_from_pl = false;
+  return out;
 }
 
-.drop svg{
-  width:46px;
-  height:46px;
-  color:var(--green);
+function makeTxn({
+  date,
+  merchant,
+  amount,
+  currency = 'AED',
+  direction,
+  parser = null,
+  raw = null,
+  reference = null,
+}) {
+  const amt = Number(amount) || 0;
+  if (!date || amt <= 0) return null;
+
+  const txn = {
+    date,
+    merchant: normalizeSpaces(merchant).slice(0, 420) || 'Unknown',
+    reference: reference ? normalizeSpaces(reference).slice(0, 220) : null,
+    amount: Math.round(amt * 100) / 100,
+    currency,
+    direction: direction === 'CR' ? 'CR' : 'DR',
+    cat: direction === 'CR' ? 'income' : 'expenses',
+    sub: 'uncategorised',
+    type: direction === 'CR' ? 'credit' : 'debit',
+    freq: 'adhoc',
+    note: null,
+    source: 'parser',
+    parser,
+    excluded_from_pl: false,
+  };
+
+  if (raw) txn.raw = normalizeSpaces(raw).slice(0, 700);
+
+  return categorizeTxn(txn);
 }
 
-.drop strong{
-  display:block;
-  font-size:20px;
-  margin:10px 0 4px;
+function compactRows(rows) {
+  return rows.filter(Boolean);
 }
 
-.drop span{color:var(--muted)}
+function parseTaggedSingleDate(text) {
+  const rows = [];
+  const lines = text.split(/\n+/).map(normalizeSpaces).filter(Boolean);
 
-.chips{
-  margin-top:12px;
-  display:flex;
-  justify-content:center;
-  gap:8px;
+  const date = '(?:\\d{1,2}[\\/\\-]\\d{1,2}[\\/\\-]\\d{4}|\\d{4}[\\/\\-]\\d{1,2}[\\/\\-]\\d{1,2})';
+
+  const re = new RegExp(
+    `^(${date})\\s+(.+?)\\s+(DR|CR|D|C|DEBIT|CREDIT)\\s+(-?\\(?[\\d,]+(?:\\.\\d+)?\\)?|-?\\(?\\.\\d+\\)?)$`,
+    'i'
+  );
+
+  for (const line of lines) {
+    if (isNoiseLine(line)) continue;
+
+    const m = line.match(re);
+    if (!m) continue;
+
+    const dateIso = isoFromAnyDate(m[1]);
+    const amount = parseAmount(m[4]);
+
+    if (!dateIso || amount <= 0) continue;
+
+    rows.push(makeTxn({
+      date: dateIso,
+      merchant: m[2],
+      amount,
+      direction: /^(CR|C|CREDIT)$/i.test(m[3]) ? 'CR' : 'DR',
+      parser: 'tagged_single_date',
+      raw: line,
+    }));
+  }
+
+  return compactRows(rows);
 }
 
-.chip{
-  font-size:12px;
-  border:1px solid var(--line);
-  background:#fbfaf7;
-  padding:5px 10px;
-  border-radius:999px;
+function parseTwoDateCard(text) {
+  const rows = [];
+  const lines = text.split(/\n+/).map(normalizeSpaces).filter(Boolean);
+
+  const date = '(?:\\d{1,2}[\\/\\-]\\d{1,2}[\\/\\-]\\d{4}|\\d{4}[\\/\\-]\\d{1,2}[\\/\\-]\\d{1,2})';
+
+  const re = new RegExp(
+    `^(${date})\\s+(${date})\\s+(.+?)\\s+(-?\\(?[\\d,]+(?:\\.\\d+)?\\)?|-?\\(?\\.\\d+\\)?)\\s*(CR|DR|C|D|CREDIT|DEBIT)?$`,
+    'i'
+  );
+
+  for (const line of lines) {
+    if (isNoiseLine(line)) continue;
+    if (/^\d{6}\*+\d+\s*-/.test(line)) continue;
+
+    const m = line.match(re);
+    if (!m) continue;
+
+    const dateIso = isoFromAnyDate(m[1]);
+    const desc = m[3];
+    const signed = parseSignedAmount(m[4]);
+    const marker = (m[5] || '').toUpperCase();
+
+    if (!dateIso || signed.amount <= 0) continue;
+
+    let direction = 'DR';
+
+    if (/^(CR|C|CREDIT)$/.test(marker)) direction = 'CR';
+    else if (/^(DR|D|DEBIT)$/.test(marker)) direction = 'DR';
+    else if (signed.isNegative) direction = 'DR';
+    else if (/\b(payment received|paymentreceived|refund|reversal|cashback|credit adjustment)\b/i.test(desc)) direction = 'CR';
+
+    rows.push(makeTxn({
+      date: dateIso,
+      merchant: desc,
+      amount: signed.amount,
+      direction,
+      parser: 'two_date_card',
+      raw: line,
+    }));
+  }
+
+  return compactRows(rows);
 }
 
-.files{
-  margin-top:16px;
-  display:grid;
-  gap:10px;
+function fixAccountAmountOcr(s) {
+  return String(s || '')
+    .replace(/\b[Il]OO\b/g, '100')
+    .replace(/\b[Il]00\b/g, '100')
+    .replace(/\bO\.OO\b/gi, '0.00')
+    .replace(/\bO\.00\b/gi, '0.00')
+    .replace(/\b0\.OO\b/gi, '0.00');
 }
 
-.file{
-  display:flex;
-  align-items:center;
-  justify-content:space-between;
-  border:1px solid var(--line);
-  background:#fff;
-  border-radius:13px;
-  padding:12px 14px;
+function splitAccountDescriptionAndReference(body) {
+  const text = normalizeSpaces(body);
+
+  if (!text) {
+    return { description: '', reference: null };
+  }
+
+  let m = text.match(/^SALARY\s+(.+)$/i);
+  if (m) {
+    return {
+      description: 'SALARY',
+      reference: normalizeSpaces(m[1]),
+    };
+  }
+
+  m = text.match(/^(.*?)\s+(PHUB[0-9A-Z]+(?:\s+[0-9A-Z]+)?)$/i);
+  if (m) {
+    return {
+      description: normalizeSpaces(m[1]),
+      reference: normalizeSpaces(m[2]),
+    };
+  }
+
+  m = text.match(/^(.*?)\s+(\d{8,}\s+[A-Z0-9]{2,})$/i);
+  if (m) {
+    return {
+      description: normalizeSpaces(m[1]),
+      reference: normalizeSpaces(m[2]),
+    };
+  }
+
+  m = text.match(/^(.*?)\s+([A-Z0-9]{8,}\s+[A-Z0-9]{2,})$/i);
+  if (m) {
+    return {
+      description: normalizeSpaces(m[1]),
+      reference: normalizeSpaces(m[2]),
+    };
+  }
+
+  m = text.match(/^(.*?)\s+(\d{8,})$/i);
+  if (m) {
+    return {
+      description: normalizeSpaces(m[1]),
+      reference: normalizeSpaces(m[2]),
+    };
+  }
+
+  return {
+    description: text,
+    reference: null,
+  };
 }
 
-.file small{color:var(--muted)}
-
-button{
-  appearance:none;
-  border:0;
-  background:#161412;
-  color:#fff;
-  border-radius:13px;
-  padding:15px 20px;
-  font-weight:800;
-  font-size:16px;
-  cursor:pointer;
-}
-
-button:disabled{
-  opacity:.45;
-  cursor:not-allowed;
-}
-
-.primary{
-  width:100%;
-  margin-top:16px;
-}
-
-.ghostBtn{
-  background:#fff;
-  color:#171411;
-  border:1px solid var(--line);
-}
-
-.smallBtn{
-  padding:10px 12px;
-  font-size:13px;
-  border-radius:11px;
-}
-
-.side{padding:22px}
-.side h2{margin:0 0 14px;font-size:18px}
-
-.status{
-  display:grid;
-  gap:10px;
-}
-
-.step{
-  display:flex;
-  gap:10px;
-  align-items:center;
-  color:var(--muted);
-}
-
-.dot{
-  width:10px;
-  height:10px;
-  border-radius:50%;
-  background:#ddd;
-}
-
-.step.on{
-  color:var(--ink);
-  font-weight:700;
-}
-
-.step.on .dot{background:var(--green)}
-
-.msg{
-  margin-top:16px;
-  padding:14px;
-  border-radius:14px;
-  border:1px solid var(--line);
-  background:var(--soft);
-  color:var(--muted);
-  line-height:1.45;
-}
-
-.msg.err{
-  background:#fff2f0;
-  border-color:#f0b1aa;
-  color:#ab241b;
-}
-
-.msg.ok{
-  background:#effbf3;
-  border-color:#bfe6cd;
-  color:#0b6c43;
-}
-
-.dashboard{
-  display:none;
-  margin-top:26px;
-}
-
-.section{
-  margin-top:16px;
-  overflow:hidden;
-}
-
-details.section>summary{
-  list-style:none;
-  cursor:pointer;
-  display:flex;
-  align-items:center;
-  justify-content:space-between;
-  padding:16px 18px;
-  font-weight:800;
-  font-size:18px;
-}
-
-details.section>summary::-webkit-details-marker{display:none}
-
-.summaryMeta{
-  font-size:12px;
-  color:var(--muted);
-  font-weight:600;
-  margin-left:8px;
-}
-
-.chev{
-  width:28px;
-  height:28px;
-  border-radius:999px;
-  border:1px solid var(--line);
-  display:inline-flex;
-  align-items:center;
-  justify-content:center;
-  color:var(--muted);
-}
-
-details[open] .chev{transform:rotate(180deg)}
-
-.sectionBody{padding:0 18px 18px}
-
-.grid{
-  display:grid;
-  grid-template-columns:repeat(auto-fit,minmax(170px,1fr));
-  gap:14px;
-}
-
-.metric{padding:18px}
-
-.metric span{
-  display:block;
-  color:var(--muted);
-  font-size:13px;
-}
-
-.metric strong{
-  display:block;
-  margin-top:5px;
-  font-size:24px;
-}
-
-.metric small{
-  display:block;
-  color:var(--muted);
-  margin-top:4px;
-  font-size:12px;
-}
-
-.tools{
-  display:flex;
-  flex-wrap:wrap;
-  gap:10px;
-  align-items:center;
-  justify-content:space-between;
-  margin:4px 0 12px;
-}
-
-.tools input,
-.tools select{
-  border:1px solid var(--line);
-  border-radius:12px;
-  background:#fff;
-  padding:12px;
-  font:inherit;
-  min-width:180px;
-}
-
-.tableWrap{
-  overflow:auto;
-  border-radius:18px;
-  border:1px solid var(--line);
-  background:#fff;
-  max-height:620px;
-}
-
-table{
-  width:100%;
-  border-collapse:collapse;
-  font-size:14px;
-}
-
-th,td{
-  padding:12px 14px;
-  border-bottom:1px solid var(--line);
-  text-align:left;
-  vertical-align:top;
-  white-space:nowrap;
-}
-
-th{
-  position:sticky;
-  top:0;
-  background:#fbfaf7;
-  z-index:1;
-  color:#5f5952;
-}
-
-.merchant{
-  white-space:normal;
-  min-width:360px;
-}
-
-.tag{
-  display:inline-block;
-  border-radius:999px;
-  padding:4px 9px;
-  font-size:12px;
-  font-weight:800;
-  background:#f2eee8;
-  color:#4b453e;
-}
-
-.tag.CR{background:#e9f8ef;color:#087644}
-.tag.DR{background:#fff0ed;color:#a83225}
-.tag.savings{background:#f0ecff;color:#6036c7}
-.tag.internal{background:#eef0f3;color:#555}
-
-.insight{
-  padding:18px;
-  background:#161412;
-  color:#fff;
-  border-radius:18px;
-}
-
-.insight h3{margin:0 0 6px}
-
-.insight ul{
-  margin:10px 0 0;
-  padding-left:18px;
-  color:#f0ece6;
-}
-
-.qrow{
-  display:grid;
-  grid-template-columns:1.5fr .55fr .55fr .8fr 1.6fr;
-  gap:10px;
-  padding:10px;
-  border-top:1px solid var(--line);
-  align-items:start;
-}
-
-.qrow:first-of-type{border-top:0}
-
-.qok{color:var(--green);font-weight:800}
-.qwarn{color:var(--amber);font-weight:800}
-.qfail{color:var(--red);font-weight:800}
-
-.mini{
-  font-size:12px;
-  color:var(--muted);
-}
-
-.chartNote{
-  margin:0 0 10px;
-  color:var(--muted);
-  font-size:13px;
-  line-height:1.5;
-}
-
-.chartWrap{
-  border:1px solid var(--line);
-  border-radius:18px;
-  background:#fff;
-  padding:10px 12px;
-}
-
-.legend{
-  display:flex;
-  flex-wrap:wrap;
-  gap:12px;
-  margin:4px 0 8px;
-}
-
-.legend span{
-  display:inline-flex;
-  align-items:center;
-  gap:7px;
-  font-size:13px;
-  color:var(--muted);
-}
-
-.legend i{
-  display:inline-block;
-  width:12px;
-  height:12px;
-  border-radius:999px;
-}
-
-.chartSvg{
-  width:100%;
-  height:auto;
-  display:block;
-}
-
-.chartAxis{font-size:11px;fill:#8b847d}
-.chartGrid{stroke:#ece6de;stroke-width:1}
-.chartFrame{stroke:#ded7cf;stroke-width:1;fill:none}
-.chartDot{stroke:#fff;stroke-width:2}
-.seriesLabel{font-size:11px;font-weight:800}
-
-.statStrip{
-  display:grid;
-  grid-template-columns:repeat(auto-fit,minmax(120px,1fr));
-  gap:10px;
-  margin-top:10px;
-}
-
-.tinyCard{
-  border:1px solid var(--line);
-  border-radius:14px;
-  padding:10px 12px;
-  background:#fbfaf7;
-}
-
-.tinyCard b{
-  display:block;
-  font-size:16px;
-}
-
-.tinyCard span{
-  display:block;
-  color:var(--muted);
-  font-size:12px;
-}
-
-@media(max-width:880px){
-  .hero{grid-template-columns:1fr}
-  .top{padding:0 18px}
-  .wrap{padding:24px 14px}
-  .drop{padding:24px}
-  th,td{padding:10px}
-  .qrow{grid-template-columns:1fr}
-  .sectionBody{padding:0 12px 12px}
-}
-</style>
-</head>
-
-<body>
-<header class="top">
-  <div class="brand"><div class="logo">▰</div>Wyz</div>
-  <div class="pill">Debit/Credit safe · ignored transfers · local review</div>
-</header>
-
-<main class="wrap">
-  <section class="hero">
-    <div class="card upload">
-      <h1>Upload your statements</h1>
-      <p>PDF or CSV — credit cards, bank accounts and payslips. Account-statement balances are never used as transaction amounts.</p>
-
-      <input id="fileInput" type="file" multiple accept=".pdf,.csv,.txt" hidden>
-
-      <div id="drop" class="drop">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
-          <path d="M12 16V4"/>
-          <path d="m7 9 5-5 5 5"/>
-          <path d="M5 16v2a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-2"/>
-        </svg>
-        <strong>Drop files or tap to browse</strong>
-        <span>Upload one or many files at once</span>
-        <div class="chips">
-          <div class="chip">PDF</div>
-          <div class="chip">CSV</div>
-          <div class="chip">TXT</div>
-        </div>
-      </div>
-
-      <div id="files" class="files"></div>
-      <button id="analyzeBtn" class="primary" disabled>Analyse files</button>
-      <div id="message" class="msg">Ready. Upload your statements and run analysis.</div>
-    </div>
-
-    <div class="card side">
-      <h2>Processing status</h2>
-      <div class="status">
-        <div id="s1" class="step"><div class="dot"></div>Reading file text with layout preservation</div>
-        <div id="s2" class="step"><div class="dot"></div>Applying deterministic parsers</div>
-        <div id="s3" class="step"><div class="dot"></div>Excluding transfers and settlements from P/L</div>
-        <div id="s4" class="step"><div class="dot"></div>Building dashboard</div>
-      </div>
-
-      <div class="msg">
-        <b>Review mode:</b> Search any vendor/person, select visible rows, then move them to Income, Expenses, Savings, or Ignored.
-      </div>
-    </div>
-  </section>
-
-  <section id="dashboard" class="dashboard">
-    <details class="card section" open>
-      <summary>Summary cards <span class="chev">⌃</span></summary>
-      <div class="sectionBody">
-        <div class="grid">
-          <div class="card metric">
-            <span>Income</span>
-            <strong id="mIncome">AED 0</strong>
-            <small>Credits counted in P/L</small>
-          </div>
-          <div class="card metric">
-            <span>Expenses</span>
-            <strong id="mExpenses">AED 0</strong>
-            <small>Debits counted in P/L</small>
-          </div>
-          <div class="card metric">
-            <span>Savings</span>
-            <strong id="mSavings">AED 0</strong>
-            <small>User-selected savings/investments</small>
-          </div>
-          <div class="card metric">
-            <span>Ignored transfers</span>
-            <strong id="mIgnored">AED 0</strong>
-            <small>Excluded from P/L</small>
-          </div>
-          <div class="card metric">
-            <span>Net P/L</span>
-            <strong id="mPL">AED 0</strong>
-            <small>Income - expenses - savings</small>
-          </div>
-        </div>
-      </div>
-    </details>
-
-    <details id="trendPanel" class="card section" open>
-      <summary>Monthly overview <span class="summaryMeta">Income · Expenses · Savings · P/L</span><span class="chev">⌃</span></summary>
-      <div class="sectionBody">
-        <p class="chartNote">P/L = Income - Expenses - Savings. Ignored transfers are excluded.</p>
-        <div class="chartWrap">
-          <div class="legend">
-            <span><i style="background:#0d8a53"></i>Income</span>
-            <span><i style="background:#c0392b"></i>Expenses</span>
-            <span><i style="background:#7d4cff"></i>Savings</span>
-            <span><i style="background:#1f6fff"></i>P/L</span>
-          </div>
-          <div id="trendStats" class="statStrip"></div>
-          <div id="trendChart"></div>
-        </div>
-      </div>
-    </details>
-
-    <details id="insightPanel" class="card section" open style="display:none">
-      <summary>Insights <span class="chev">⌃</span></summary>
-      <div class="sectionBody">
-        <div id="insight" class="insight">
-          <h3 id="insightHeadline"></h3>
-          <p id="insightDetail"></p>
-        </div>
-      </div>
-    </details>
-
-    <details id="qualityPanel" class="card section" open style="display:none">
-      <summary>Parse quality report <span class="chev">⌃</span></summary>
-      <div class="sectionBody">
-        <div id="qualityRows"></div>
-      </div>
-    </details>
-
-    <details class="card section" open>
-      <summary>Transactions listing <span class="summaryMeta">Search, select and move</span><span class="chev">⌃</span></summary>
-      <div class="sectionBody">
-        <div class="tools">
-          <div style="display:flex;gap:10px;flex-wrap:wrap">
-            <input id="search" placeholder="Search merchant / description...">
-            <select id="catFilter">
-              <option value="">All categories</option>
-              <option value="income">Income</option>
-              <option value="expenses">Expenses</option>
-              <option value="savings_investments">Savings</option>
-              <option value="internal_transfer">Ignored transfers</option>
-            </select>
-          </div>
-
-          <div style="display:flex;gap:10px;flex-wrap:wrap">
-            <button id="moveIncome" class="ghostBtn smallBtn">Move selected to Income</button>
-            <button id="moveExpense" class="ghostBtn smallBtn">Move selected to Expenses</button>
-            <button id="moveSavings" class="ghostBtn smallBtn">Move selected to Savings</button>
-            <button id="moveIgnored" class="ghostBtn smallBtn">Move selected to Ignored</button>
-            <button id="downloadCsv" class="smallBtn">Download CSV</button>
-            <button id="clearBtn" class="ghostBtn smallBtn">Clear</button>
-          </div>
-        </div>
-
-        <div class="tableWrap">
-          <table>
-            <thead>
-              <tr>
-                <th><input id="selectVisible" type="checkbox"></th>
-                <th>#</th>
-                <th>Date</th>
-                <th>Direction</th>
-                <th class="merchant">Merchant / description</th>
-                <th>Amount <span id="visibleTotal" class="mini"></span></th>
-                <th>Category</th>
-                <th>File</th>
-              </tr>
-            </thead>
-            <tbody id="tbody"></tbody>
-          </table>
-        </div>
-      </div>
-    </details>
-  </section>
-</main>
-
-<script>
-const API_URL = '/api/analyze';
-const STORAGE_KEY = 'wyz.saved.generic.v4';
-
-const state = {
-  files: [],
-  transactions: [],
-  fileStats: []
-};
-
-const el = id => document.getElementById(id);
-
-const money = n => 'AED ' + (Number(n) || 0).toLocaleString(undefined, {
-  maximumFractionDigits: 2
-});
-
-const setStep = n => {
-  ['s1','s2','s3','s4'].forEach((id, i) => {
-    el(id).classList.toggle('on', i < n);
-  });
-};
-
-const setMsg = (html, cls = '') => {
-  el('message').className = 'msg ' + cls;
-  el('message').innerHTML = html;
-};
-
-pdfjsLib.GlobalWorkerOptions.workerSrc =
-  'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
-
-el('drop').onclick = () => el('fileInput').click();
-el('fileInput').onchange = e => addFiles([...e.target.files]);
-
-['dragenter','dragover'].forEach(ev => {
-  el('drop').addEventListener(ev, e => {
-    e.preventDefault();
-    el('drop').style.borderColor = '#111';
-  });
-});
-
-['dragleave','drop'].forEach(ev => {
-  el('drop').addEventListener(ev, e => {
-    e.preventDefault();
-    el('drop').style.borderColor = '';
-  });
-});
-
-el('drop').addEventListener('drop', e => addFiles([...e.dataTransfer.files]));
-
-window.addEventListener('resize', () => {
-  if (state.transactions.length) renderTrendChart();
-});
-
-function addFiles(files) {
-  for (const f of files) {
-    if (!state.files.some(x => x.name === f.name && x.size === f.size)) {
-      state.files.push(f);
+function parseAccountTable(text) {
+  const rawLines = String(text || '')
+    .split(/\n+/)
+    .map(normalizeSpaces)
+    .filter(Boolean);
+
+  const rows = [];
+  const datePat = '(?:\\d{1,2}[\\/\\-]\\d{1,2}[\\/\\-]\\d{4}|\\d{4}[\\/\\-]\\d{1,2}[\\/\\-]\\d{1,2})';
+
+  const records = [];
+  let current = [];
+
+  function flush() {
+    if (current.length) {
+      records.push(current.join(' '));
+      current = [];
     }
   }
 
-  renderFiles();
-}
+  for (const line of rawLines) {
+    if (isNoiseLine(line)) continue;
 
-function renderFiles() {
-  el('files').innerHTML = state.files.map((f, i) => `
-    <div class="file">
-      <div>
-        <b>${escapeHtml(f.name)}</b><br>
-        <small>${Math.round(f.size / 1024)} KB</small>
-      </div>
-      <button onclick="removeFile(${i})">Remove</button>
-    </div>
-  `).join('');
+    const startsRecord = new RegExp(
+      `^${datePat}(?:\\s+\\d{1,2}:\\d{2}(?::\\d{2})?)?(?:\\s+${datePat})?\\b`
+    ).test(line);
 
-  el('analyzeBtn').disabled = !state.files.length;
-}
+    if (startsRecord) {
+      flush();
+      current.push(line);
+    } else if (current.length) {
+      current.push(line);
+    }
+  }
 
-window.removeFile = i => {
-  state.files.splice(i, 1);
-  renderFiles();
-};
+  flush();
 
-async function extractPdfText(file) {
-  const ab = await file.arrayBuffer();
+  for (const rec0 of records) {
+    const rec = normalizeSpaces(fixAccountAmountOcr(rec0));
+    if (!rec) continue;
 
-  const pdf = await pdfjsLib.getDocument({
-    data: new Uint8Array(ab)
-  }).promise;
+    const dateMatches = [...rec.matchAll(new RegExp(datePat, 'g'))];
+    if (!dateMatches.length) continue;
 
-  let text = '';
+    const postingDateIso = isoFromAnyDate(dateMatches[0][0]);
+    if (!postingDateIso) continue;
 
-  for (let p = 1; p <= pdf.numPages; p++) {
-    const page = await pdf.getPage(p);
-    const content = await page.getTextContent();
-    const rows = {};
+    let rest = rec.slice(dateMatches[0].index + dateMatches[0][0].length).trim();
 
-    for (const item of content.items) {
-      const str = (item.str || '').trim();
-      if (!str) continue;
+    // Remove posting time.
+    rest = rest.replace(/^\d{1,2}:\d{2}(?::\d{2})?\s+/, '').trim();
 
-      const y = Math.round(item.transform[5]);
-      const x = item.transform[4];
-
-      if (!rows[y]) rows[y] = [];
-      rows[y].push({ x, str });
+    // Remove value date if present.
+    const secondDate = rest.match(new RegExp(`^(${datePat})\\b`));
+    if (secondDate) {
+      rest = rest.slice(secondDate[0].length).trim();
     }
 
-    const pageLines = Object.keys(rows)
-      .map(Number)
-      .sort((a,b) => b - a)
-      .map(y => rows[y].sort((a,b) => a.x - b.x).map(i => i.str).join(' '))
-      .join('\n');
+    const nums = [...rest.matchAll(new RegExp(`(?:^|\\s)(${NUM_SRC})(?=\\s|$)`, 'g'))];
 
-    text += pageLines + '\n';
-  }
+    // Need at least Debit, Credit, and Balance.
+    if (nums.length < 3) continue;
 
-  return text.trim();
-}
+    // HARD RULE:
+    // Right-most number is Balance. Discard it completely.
+    // The two numbers before it are Debit Amount and Credit Amount.
+    const debitMatch = nums[nums.length - 3];
+    const creditMatch = nums[nums.length - 2];
 
-async function extractText(file) {
-  const name = file.name.toLowerCase();
+    const debit = parseAmount(debitMatch[1]);
+    const credit = parseAmount(creditMatch[1]);
 
-  if (name.endsWith('.pdf')) return extractPdfText(file);
-  if (name.endsWith('.csv')) return file.text();
-  if (name.endsWith('.txt')) return file.text();
+    let amount = 0;
+    let direction = null;
 
-  throw new Error('Unsupported file. Please upload PDF, CSV, or TXT.');
-}
-
-async function postJson(payload) {
-  const res = await fetch(API_URL, {
-    method: 'POST',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify(payload)
-  });
-
-  const data = await res.json().catch(() => ({
-    error: 'bad_json',
-    message: 'Server returned non-JSON response'
-  }));
-
-  if (!res.ok) {
-    throw new Error(data.message || data.error || `HTTP ${res.status}`);
-  }
-
-  return data;
-}
-
-el('analyzeBtn').onclick = async () => {
-  el('analyzeBtn').disabled = true;
-  setStep(0);
-  setMsg('Starting analysis...');
-
-  const failed = [];
-  const processed = [];
-  const skipped = [];
-
-  let fileIdx = state.fileStats.length + 1;
-  const already = new Set(state.fileStats.map(x => x.file));
-
-  for (const file of state.files) {
-    if (already.has(file.name)) {
-      skipped.push({
-        file: file.name,
-        reason: 'Already processed in saved dashboard. Clear first to reprocess this same file.'
-      });
+    if (debit > 0 && credit === 0) {
+      amount = debit;
+      direction = 'DR';
+    } else if (credit > 0 && debit === 0) {
+      amount = credit;
+      direction = 'CR';
+    } else {
+      // Both zero or both positive means ambiguous. Skip. Do not guess.
       continue;
     }
 
-    try {
-      setStep(1);
-      setMsg(`Reading <b>${escapeHtml(file.name)}</b>...`);
+    if (!direction || amount <= 0) continue;
 
-      const text = await extractText(file);
+    // Everything before the Debit Amount column is Description + Ref/Cheque No.
+    const body = rest.slice(0, debitMatch.index).trim();
+    const split = splitAccountDescriptionAndReference(body);
 
-      setStep(2);
-      setMsg(`Parsing <b>${escapeHtml(file.name)}</b>...`);
+    if (!split.description || split.description.length < 2) continue;
 
-      const data = await postJson({
-        action: 'extract',
-        filename: file.name,
-        text
-      });
+    rows.push(makeTxn({
+      date: postingDateIso,
+      merchant: split.description,
+      reference: split.reference,
+      amount,
+      direction,
+      parser: 'account_table',
+      raw: rec,
+    }));
+  }
 
-      const txns = (data.transactions || []).map(t => ({
-        ...t,
-        _file: file.name,
-        _fileIdx: fileIdx,
-        _fileSize: file.size
-      }));
+  return compactRows(rows);
+}
 
-      state.transactions.push(...txns);
+function parseSignedAmountRows(text) {
+  const rows = [];
+  const lines = text.split(/\n+/).map(normalizeSpaces).filter(Boolean);
 
-      const report = data.parse_report || {
-        status: data.warning ? 'review' : (txns.length ? 'ok' : 'failed'),
-        confidence: txns.length ? 0.8 : 0,
-        transactions_extracted: txns.length,
-        warnings: data.warning ? [data.warning] : []
-      };
+  const date = '(?:\\d{1,2}[\\/\\-]\\d{1,2}[\\/\\-]\\d{4}|\\d{4}[\\/\\-]\\d{1,2}[\\/\\-]\\d{1,2})';
 
-      state.fileStats.push({
-        file: file.name,
-        parser: data.parser,
-        count: data.count,
-        warning: data.warning,
-        parse_report: report
-      });
+  const re = new RegExp(
+    `^(${date})\\s+(.+?)\\s+(-\\(?[\\d,]+(?:\\.\\d+)?\\)?|\\([\\d,]+(?:\\.\\d+)?\\))\\s*(?:[A-Z]{3})?(?:\\s+[-\\d,.()]+)?$`,
+    'i'
+  );
 
-      if (report.status !== 'ok') {
-        failed.push({
-          file: file.name,
-          reason: (report.warnings || [])[0] || data.warning || 'Needs review'
-        });
+  for (const line of lines) {
+    if (isNoiseLine(line)) continue;
+
+    const m = line.match(re);
+    if (!m) continue;
+
+    const dateIso = isoFromAnyDate(m[1]);
+    const signed = parseSignedAmount(m[3]);
+
+    if (!dateIso || signed.amount <= 0) continue;
+
+    rows.push(makeTxn({
+      date: dateIso,
+      merchant: m[2],
+      amount: signed.amount,
+      direction: signed.isNegative ? 'DR' : 'CR',
+      parser: 'signed_amount',
+      raw: line,
+    }));
+  }
+
+  return compactRows(rows);
+}
+
+function parseCsvLike(text) {
+  const raw = String(text || '').trim();
+  if (!raw.includes(',') && !raw.includes('\t')) return [];
+
+  const delimiter = raw.includes('\t') ? '\t' : ',';
+  const lines = raw.split(/\n+/).filter(Boolean);
+
+  if (lines.length < 2) return [];
+
+  const split = line => {
+    const out = [];
+    let cur = '';
+    let q = false;
+
+    for (let i = 0; i < line.length; i++) {
+      const ch = line[i];
+
+      if (ch === '"') {
+        if (q && line[i + 1] === '"') {
+          cur += '"';
+          i++;
+        } else {
+          q = !q;
+        }
+      } else if (ch === delimiter && !q) {
+        out.push(cur.trim());
+        cur = '';
+      } else {
+        cur += ch;
       }
+    }
 
-      processed.push(file.name);
-      fileIdx++;
-      setStep(3);
-    } catch (err) {
-      console.error(err);
-      failed.push({
-        file: file.name,
-        reason: err.message
-      });
+    out.push(cur.trim());
+    return out;
+  };
+
+  const headers = split(lines[0]).map(h => h.toLowerCase().replace(/[^a-z0-9]+/g, '_'));
+
+  const idx = (...names) => {
+    for (const n of names) {
+      const i = headers.findIndex(h => h === n || h.includes(n));
+      if (i >= 0) return i;
+    }
+    return -1;
+  };
+
+  const dateIdx = idx('date', 'transaction_date', 'posting_date');
+  const descIdx = idx('description', 'merchant', 'narration', 'details', 'particulars');
+  const amountIdx = idx('amount');
+  const debitIdx = idx('debit', 'withdrawal', 'paid_out', 'money_out');
+  const creditIdx = idx('credit', 'deposit', 'paid_in', 'money_in');
+
+  if (dateIdx < 0 || descIdx < 0) return [];
+
+  const rows = [];
+
+  for (const line of lines.slice(1)) {
+    const cells = split(line);
+    const dateIso = isoFromAnyDate(cells[dateIdx]);
+    const desc = cells[descIdx];
+
+    if (!dateIso || !desc) continue;
+
+    let direction = null;
+    let amount = 0;
+
+    if (debitIdx >= 0 && parseAmount(cells[debitIdx]) > 0) {
+      direction = 'DR';
+      amount = parseAmount(cells[debitIdx]);
+    } else if (creditIdx >= 0 && parseAmount(cells[creditIdx]) > 0) {
+      direction = 'CR';
+      amount = parseAmount(cells[creditIdx]);
+    } else if (amountIdx >= 0) {
+      const signed = parseSignedAmount(cells[amountIdx]);
+      direction = signed.isNegative ? 'DR' : 'CR';
+      amount = signed.amount;
+    }
+
+    if (!direction || amount <= 0) continue;
+
+    rows.push(makeTxn({
+      date: dateIso,
+      merchant: desc,
+      amount,
+      direction,
+      parser: 'csv_like',
+      raw: line,
+    }));
+  }
+
+  return compactRows(rows);
+}
+
+function parsePayslip(text) {
+  if (!/payslip|payroll|net\s+pay/i.test(text)) return [];
+
+  const net = text.match(/Net\s+Pay\s+([\d,]+(?:\.\d+)?)/i);
+  if (!net) return [];
+
+  const period = text.match(/Payroll Interval\s+(\d{1,2}\s+[A-Za-z]{3,9}\s+\d{4})\s+-\s+(\d{1,2}\s+[A-Za-z]{3,9}\s+\d{4})/i);
+
+  let dateIso = new Date().toISOString().slice(0, 10);
+
+  if (period) {
+    const d = new Date(period[2]);
+    if (!Number.isNaN(d.getTime())) dateIso = d.toISOString().slice(0, 10);
+  }
+
+  return compactRows([
+    makeTxn({
+      date: dateIso,
+      merchant: 'Payslip Net Pay',
+      amount: parseAmount(net[1]),
+      direction: 'CR',
+      parser: 'payslip',
+      raw: 'Net Pay',
+    }),
+  ]);
+}
+
+function dedupePreserveOrder(items) {
+  const seen = new Map();
+  const out = [];
+
+  for (const t of items) {
+    if (!t) continue;
+
+    const key = `${t.date}|${t.direction}|${Number(t.amount).toFixed(2)}|${String(t.merchant).toUpperCase()}|${String(t.reference || '').toUpperCase()}`;
+    const count = seen.get(key) || 0;
+
+    if (count < 4) {
+      seen.set(key, count + 1);
+      out.push(t);
     }
   }
 
-  state.transactions.forEach((t, i) => {
-    t._globalSeq = i + 1;
+  out.forEach((t, i) => {
+    t.seq = i + 1;
   });
 
-  state.files = [];
-  renderFiles();
-  setStep(4);
-
-  if (!state.transactions.length) {
-    const lines = failed.concat(skipped)
-      .map(f => `• ${escapeHtml(f.file)}: ${escapeHtml(f.reason)}`)
-      .join('<br>');
-
-    setMsg(`<b>Something went wrong</b><br>No transactions could be extracted.<br><br>${lines}`, 'err');
-    el('analyzeBtn').disabled = false;
-    return;
-  }
-
-  renderDashboard();
-  saveState();
-
-  const attention = failed.length
-    ? `<br><br><b>Files needing attention / review:</b><br>${failed.map(f => `• ${escapeHtml(f.file)}: ${escapeHtml(f.reason)}`).join('<br>')}`
-    : '';
-
-  const skippedHtml = skipped.length
-    ? `<br><br><b>Skipped:</b><br>${skipped.map(f => `• ${escapeHtml(f.file)}: ${escapeHtml(f.reason)}`).join('<br>')}`
-    : '';
-
-  const added = processed.length ? `Added ${processed.length} file(s). ` : '';
-
-  setMsg(
-    `<b>Done.</b> ${added}Dashboard now has ${state.transactions.length} transactions from ${state.fileStats.length} files.${attention}${skippedHtml}`,
-    failed.length ? '' : 'ok'
-  );
-
-  el('analyzeBtn').disabled = false;
-  requestInsight();
-};
-
-function labelCategory(cat) {
-  if (cat === 'income') return 'Income';
-  if (cat === 'savings_investments') return 'Savings';
-  if (cat === 'internal_transfer') return 'Ignored';
-  return 'Expenses';
+  return out;
 }
 
-function summarize(txns) {
+function scoreParse(rows, text) {
+  if (!rows.length) return 0;
+
+  const dateCount = (String(text).match(/\b(?:\d{1,2}[\/\-]\d{1,2}[\/\-]\d{4}|\d{4}[\/\-]\d{1,2}[\/\-]\d{1,2})\b/g) || []).length;
+
+  return rows.length / Math.max(1, Math.min(dateCount, rows.length + 20));
+}
+
+function countCandidateRows(text) {
+  const lines = String(text || '')
+    .split(/\n+/)
+    .map(normalizeSpaces)
+    .filter(Boolean)
+    .filter(l => !isNoiseLine(l));
+
+  let count = 0;
+  const samples = [];
+
+  for (const line of lines) {
+    const hasDate = /\b(?:\d{1,2}[\/\-]\d{1,2}[\/\-]\d{4}|\d{4}[\/\-]\d{1,2}[\/\-]\d{1,2})\b/.test(line);
+    const money = line.match(amountTokenRegex()) || [];
+    const hasMoneyWords = /\b(DR|CR|DEBIT|CREDIT|WITHDRAWAL|DEPOSIT|PAID\s*OUT|PAID\s*IN|MONEY\s*OUT|MONEY\s*IN|BALANCE)\b/i.test(line);
+
+    if (hasDate && (money.length >= 1 || hasMoneyWords)) {
+      count++;
+      if (samples.length < 8) samples.push(line.slice(0, 240));
+    }
+  }
+
+  return { count, samples };
+}
+
+function extractTransactionTableRegion(text) {
+  const lines = String(text || '')
+    .split(/\n+/)
+    .map(normalizeSpaces)
+    .filter(Boolean);
+
+  if (!lines.length) {
+    return {
+      text: '',
+      found: false,
+      reason: 'empty_text',
+      startIndex: -1,
+      endIndex: -1,
+    };
+  }
+
+  const startPatterns = [
+    /Transaction Date/i,
+    /Posting Date\s+Value Date\s+Description/i,
+    /Transaction Description/i,
+    /Debit Amount\s+Credit Amount\s+Balance/i,
+    /Amount in AED/i,
+  ];
+
+  const endPatterns = [
+    /\*{3,}\s*END\s*OF\s*STATEMENT\s*\*{3,}/i,
+    /General Terms and Important Information/i,
+    /Commercial Bank of Dubai PSC/i,
+    /licensed by the Central Bank/i,
+  ];
+
+  let start = -1;
+
+  for (let i = 0; i < lines.length; i++) {
+    const windowText = lines.slice(i, i + 8).join(' ');
+    if (startPatterns.some(p => p.test(windowText))) {
+      start = i + 1;
+      break;
+    }
+  }
+
+  if (start < 0) {
+    return {
+      text,
+      found: false,
+      reason: 'transaction_table_header_not_found',
+      startIndex: -1,
+      endIndex: -1,
+    };
+  }
+
+  let end = lines.length;
+
+  for (let i = start; i < lines.length; i++) {
+    const line = lines[i];
+    if (endPatterns.some(p => p.test(line))) {
+      end = i;
+      break;
+    }
+  }
+
+  return {
+    text: lines.slice(start, end).join('\n'),
+    found: true,
+    reason: null,
+    startIndex: start,
+    endIndex: end,
+  };
+}
+
+function makeParseReport({ filename, parser, rows, cleaned, candidates, warning = null }) {
+  const fullCandidate = countCandidateRows(cleaned);
+  const tableRegion = extractTransactionTableRegion(cleaned);
+  const tableCandidate = countCandidateRows(tableRegion.text);
+
+  let candidate = tableCandidate;
+  let qualityScope = tableRegion.found ? 'transaction_table_region' : 'full_text_fallback';
+  let qualityNote = tableRegion.found
+    ? 'Candidate rows counted only within detected transaction-table region.'
+    : 'Transaction-table region was not confidently detected, so full text was used.';
+
+  if (tableRegion.found && tableCandidate.count < Math.max(1, rows.length * 0.5)) {
+    candidate = fullCandidate;
+    qualityScope = 'full_text_fallback';
+    qualityNote = 'Detected table region undercounted rows due to PDF extraction order, so full text candidate count was used.';
+  }
+
+  const extracted = rows.length;
+  const rejected = Math.max(0, candidate.count - extracted);
+
+  let confidence = 0;
+
+  if (extracted > 0) {
+    confidence = candidate.count > 0
+      ? Math.min(0.99, extracted / Math.max(extracted, candidate.count))
+      : 0.85;
+
+    if (/generic|signed|csv/i.test(parser || '')) {
+      confidence = Math.max(0.62, confidence - 0.08);
+    }
+  }
+
+  const status = extracted === 0
+    ? 'failed'
+    : confidence >= 0.95
+      ? 'ok'
+      : 'review';
+
+  const warnings = [];
+
+  if (warning) warnings.push(warning);
+
+  if (extracted === 0) {
+    warnings.push('No transaction rows were extracted. This format may need OCR or another parser.');
+  } else if (status !== 'ok') {
+    warnings.push(`Extracted ${extracted} transaction rows against ${candidate.count} estimated transaction-table candidate rows. Review recommended.`);
+  }
+
+  if (qualityScope === 'full_text_fallback') {
+    warnings.push(qualityNote);
+  }
+
+  return {
+    filename: filename || null,
+    parser: parser || null,
+    status,
+    confidence: Math.round(confidence * 100) / 100,
+    candidate_date_rows: candidate.count,
+    transactions_extracted: extracted,
+    rejected_rows_estimate: rejected,
+    quality_scope: qualityScope,
+    quality_note: qualityNote,
+    table_region_detected: tableRegion.found,
+    parser_scores: (candidates || []).map(c => ({
+      parser: c.name,
+      rows: c.rows.length,
+      score: Math.round(scoreParse(c.rows, cleaned) * 1000) / 1000,
+    })),
+    sample_candidate_rows: candidate.samples,
+    warnings,
+  };
+}
+
+function deterministicExtract(text, filename = null) {
+  const cleaned = cleanStatementText(text);
+  const isBankAccount = looksLikeBankAccountStatement(cleaned);
+
+  const candidates = [
+    { name: 'csv_like', rows: parseCsvLike(cleaned) },
+    { name: 'tagged_single_date', rows: parseTaggedSingleDate(cleaned) },
+    { name: 'two_date_card', rows: parseTwoDateCard(cleaned) },
+    { name: 'account_table', rows: parseAccountTable(cleaned) },
+    { name: 'signed_amount', rows: parseSignedAmountRows(cleaned) },
+    { name: 'payslip', rows: parsePayslip(cleaned) },
+  ];
+
+  let best;
+
+  if (isBankAccount) {
+    const accountCandidate = candidates.find(c => c.name === 'account_table');
+    best = accountCandidate && accountCandidate.rows.length > 0 ? accountCandidate : null;
+  }
+
+  if (!best) {
+    candidates.sort((a, b) => {
+      const bs = scoreParse(b.rows, cleaned);
+      const as = scoreParse(a.rows, cleaned);
+
+      if (bs !== as) return bs - as;
+      return b.rows.length - a.rows.length;
+    });
+
+    best = candidates[0];
+  }
+
+  const rows = best && best.rows.length > 0 ? dedupePreserveOrder(best.rows) : [];
+  const parser = rows.length ? best.name : null;
+
+  const parse_report = makeParseReport({
+    filename,
+    parser,
+    rows,
+    cleaned,
+    candidates,
+    warning: isBankAccount && parser !== 'account_table'
+      ? 'Bank account statement detected, but account_table parser did not win. Review required.'
+      : null,
+  });
+
+  return {
+    parser,
+    rows,
+    cleaned,
+    candidates,
+    parse_report,
+  };
+}
+
+function summarizeTransactions(txns) {
   const totals = {
     income: 0,
     expenses: 0,
     savings_investments: 0,
-    internal_transfer: 0
+    internal_transfer: 0,
   };
 
   for (const t of txns) {
@@ -964,472 +931,217 @@ function summarize(txns) {
 
   totals.pl = totals.income - totals.expenses - totals.savings_investments;
 
-  return totals;
-}
-
-function monthLabel(yyyyMm) {
-  const [y, m] = String(yyyyMm).split('-');
-  const d = new Date(Number(y), Number(m) - 1, 1);
-
-  return d.toLocaleDateString(undefined, {
-    month: 'short',
-    year: '2-digit'
-  });
-}
-
-function monthlySeries(txns) {
-  const months = [...new Set(
-    txns
-      .map(t => String(t.date || '').slice(0, 7))
-      .filter(x => /^\d{4}-\d{2}$/.test(x))
-  )].sort();
-
-  const map = new Map(months.map(m => [
-    m,
-    {
-      month: m,
-      label: monthLabel(m),
-      income: 0,
-      expenses: 0,
-      savings: 0,
-      ignored: 0,
-      pl: 0
-    }
-  ]));
-
-  for (const t of txns) {
-    const key = String(t.date || '').slice(0, 7);
-    if (!map.has(key)) continue;
-
-    const row = map.get(key);
-    const amt = Number(t.amount) || 0;
-
-    if (t.cat === 'income') row.income += amt;
-    else if (t.cat === 'savings_investments') row.savings += amt;
-    else if (t.cat === 'internal_transfer') row.ignored += amt;
-    else row.expenses += amt;
+  for (const k of Object.keys(totals)) {
+    totals[k] = Math.round(totals[k] * 100) / 100;
   }
 
-  return [...map.values()].map(r => ({
-    ...r,
-    pl: r.income - r.expenses - r.savings
-  }));
-}
-
-function renderDashboard() {
-  const totals = summarize(state.transactions);
-
-  el('mIncome').textContent = money(totals.income);
-  el('mExpenses').textContent = money(totals.expenses);
-  el('mSavings').textContent = money(totals.savings_investments);
-  el('mIgnored').textContent = money(totals.internal_transfer);
-  el('mPL').textContent = money(totals.pl);
-
-  el('dashboard').style.display = 'block';
-
-  renderTable();
-  renderQuality();
-  renderTrendChart();
-}
-
-function renderTrendChart() {
-  const series = monthlySeries(state.transactions);
-  const holder = el('trendChart');
-  const stats = el('trendStats');
-
-  if (!series.length) {
-    holder.innerHTML = '<div class="mini">No dated transactions available for a monthly chart yet.</div>';
-    stats.innerHTML = '';
-    return;
-  }
-
-  const maxVal = Math.max(1, ...series.flatMap(r => [
-    r.income,
-    r.expenses,
-    r.savings,
-    Math.max(0, r.pl)
-  ]));
-
-  const minVal = Math.min(0, ...series.map(r => r.pl));
-  const pad = (maxVal - minVal) * 0.12 || 50;
-
-  const topVal = maxVal + pad;
-  const bottomVal = minVal - pad;
-
-  const width = 860;
-  const height = 290;
-  const left = 58;
-  const right = 18;
-  const top = 20;
-  const bottom = 36;
-
-  const cw = width - left - right;
-  const ch = height - top - bottom;
-
-  const xAt = i => left + (series.length === 1 ? cw / 2 : (i * cw / (series.length - 1)));
-  const yAt = v => top + (topVal - v) * ch / Math.max(1, (topVal - bottomVal));
-
-  const mkPath = key => series
-    .map((r, i) => `${i === 0 ? 'M' : 'L'} ${xAt(i).toFixed(1)} ${yAt(r[key]).toFixed(1)}`)
-    .join(' ');
-
-  const gridVals = Array.from({length: 5}, (_, i) => bottomVal + (i * (topVal - bottomVal) / 4));
-
-  const colors = {
-    income: '#0d8a53',
-    expenses: '#c0392b',
-    savings: '#7d4cff',
-    pl: '#1f6fff'
+  return {
+    totals,
+    months: new Set(txns.map(t => String(t.date).slice(0, 7))).size || 1,
   };
-
-  const totals = summarize(state.transactions);
-
-  stats.innerHTML = `
-    <div class="tinyCard"><span>Months covered</span><b>${series.length}</b></div>
-    <div class="tinyCard"><span>Avg monthly income</span><b>${money(totals.income / series.length)}</b></div>
-    <div class="tinyCard"><span>Avg monthly expenses</span><b>${money(totals.expenses / series.length)}</b></div>
-    <div class="tinyCard"><span>Avg monthly savings</span><b>${money(totals.savings_investments / series.length)}</b></div>
-    <div class="tinyCard"><span>Avg monthly P/L</span><b>${money(totals.pl / series.length)}</b></div>
-  `;
-
-  holder.innerHTML = `
-    <svg class="chartSvg" viewBox="0 0 ${width} ${height}" preserveAspectRatio="xMidYMid meet">
-      <rect x="0" y="0" width="${width}" height="${height}" fill="#fff" rx="16"></rect>
-      <rect class="chartFrame" x="${left}" y="${top}" width="${cw}" height="${ch}" rx="12"></rect>
-      ${gridVals.map(v => `
-        <g>
-          <line class="chartGrid" x1="${left}" x2="${left + cw}" y1="${yAt(v)}" y2="${yAt(v)}"></line>
-          <text class="chartAxis" x="${left - 8}" y="${yAt(v) + 4}" text-anchor="end">${Math.round(v).toLocaleString()}</text>
-        </g>
-      `).join('')}
-      ${series.map((r, i) => `
-        <text class="chartAxis" x="${xAt(i)}" y="${height - 10}" text-anchor="middle">${escapeHtml(r.label)}</text>
-      `).join('')}
-      ${yAt(0) >= top && yAt(0) <= top + ch
-        ? `<line x1="${left}" x2="${left + cw}" y1="${yAt(0)}" y2="${yAt(0)}" stroke="#bdb5ae" stroke-dasharray="4 4"></line>`
-        : ''}
-      <path d="${mkPath('income')}" fill="none" stroke="${colors.income}" stroke-width="3"></path>
-      <path d="${mkPath('expenses')}" fill="none" stroke="${colors.expenses}" stroke-width="3"></path>
-      <path d="${mkPath('savings')}" fill="none" stroke="${colors.savings}" stroke-width="3"></path>
-      <path d="${mkPath('pl')}" fill="none" stroke="${colors.pl}" stroke-width="3.5"></path>
-      ${['income','expenses','savings','pl'].map(key =>
-        series.map((r, i) => `
-          <circle class="chartDot" cx="${xAt(i)}" cy="${yAt(r[key])}" r="4" fill="${colors[key]}">
-            <title>${r.label} · ${key.toUpperCase()} · ${money(r[key])}</title>
-          </circle>
-        `).join('')
-      ).join('')}
-      <text class="seriesLabel" x="${left + 6}" y="${top + 14}" fill="${colors.income}">Income</text>
-      <text class="seriesLabel" x="${left + 70}" y="${top + 14}" fill="${colors.expenses}">Expenses</text>
-      <text class="seriesLabel" x="${left + 155}" y="${top + 14}" fill="${colors.savings}">Savings</text>
-      <text class="seriesLabel" x="${left + 230}" y="${top + 14}" fill="${colors.pl}">P/L</text>
-    </svg>
-  `;
 }
 
-function renderQuality() {
-  const rows = state.fileStats || [];
-
-  if (!rows.length) {
-    el('qualityPanel').style.display = 'none';
-    return;
+async function callClaude({ prompt, userContent, apiKey, maxTokens, timeoutMs }) {
+  if (!apiKey) {
+    throw new Error('config_missing: ANTHROPIC_API_KEY is not configured');
   }
 
-  el('qualityPanel').style.display = 'block';
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
 
-  el('qualityRows').innerHTML = rows.map(x => {
-    const r = x.parse_report || {};
-    const rawStatus = r.status || (x.warning ? 'review' : 'ok');
-    const status = rawStatus === 'warning' ? 'review' : rawStatus;
-    const cls = status === 'ok' ? 'qok' : (status === 'failed' ? 'qfail' : 'qwarn');
-    const conf = r.confidence == null ? '' : Math.round(Number(r.confidence) * 100) + '%';
-    const cand = r.candidate_date_rows ?? 'n/a';
-    const ext = r.transactions_extracted ?? x.count ?? 0;
-    const warn = (r.warnings && r.warnings[0]) || x.warning || r.quality_note || '';
-
-    return `
-      <div class="qrow">
-        <div>
-          <b>${escapeHtml(x.file)}</b><br>
-          <span class="mini">${escapeHtml(x.parser || r.parser || 'unknown')}</span>
-        </div>
-        <div class="${cls}">${escapeHtml(status)}</div>
-        <div>${escapeHtml(conf)}</div>
-        <div>${ext}/${cand} rows</div>
-        <div class="mini">${escapeHtml(warn)}</div>
-      </div>
-    `;
-  }).join('');
-}
-
-function getVisibleRows() {
-  const q = el('search').value.toLowerCase();
-  const c = el('catFilter').value;
-
-  return state.transactions.filter(t =>
-    (!q || String(t.merchant).toLowerCase().includes(q) || String(t.raw || '').toLowerCase().includes(q)) &&
-    (!c || t.cat === c)
-  );
-}
-
-function renderTable() {
-  const rows = getVisibleRows();
-
-  const dr = rows
-    .filter(t => t.direction === 'DR')
-    .reduce((a, t) => a + (Number(t.amount) || 0), 0);
-
-  const cr = rows
-    .filter(t => t.direction === 'CR')
-    .reduce((a, t) => a + (Number(t.amount) || 0), 0);
-
-  const savings = rows
-    .filter(t => t.cat === 'savings_investments')
-    .reduce((a, t) => a + (Number(t.amount) || 0), 0);
-
-  const ignored = rows
-    .filter(t => t.cat === 'internal_transfer')
-    .reduce((a, t) => a + (Number(t.amount) || 0), 0);
-
-  el('visibleTotal').textContent = rows.length
-    ? ` · visible DR ${money(dr)}${cr ? `, CR ${money(cr)}` : ''}${savings ? `, Savings ${money(savings)}` : ''}${ignored ? `, Ignored ${money(ignored)}` : ''} · ${rows.length} rows`
-    : '';
-
-  el('tbody').innerHTML = rows.map(t => `
-    <tr>
-      <td><input class="rowCheck" type="checkbox" data-seq="${t._globalSeq}"></td>
-      <td>${t._globalSeq}</td>
-      <td>${escapeHtml(t.date || '')}</td>
-      <td><span class="tag ${t.direction}">${t.direction}</span></td>
-      <td class="merchant">${escapeHtml(t.merchant || '')}</td>
-      <td>${money(t.amount)}</td>
-      <td><span class="tag ${t.cat === 'savings_investments' ? 'savings' : ''} ${t.cat === 'internal_transfer' ? 'internal' : ''}">${escapeHtml(labelCategory(t.cat))}</span></td>
-      <td class="mini">${escapeHtml(t._file || '')}</td>
-    </tr>
-  `).join('');
-
-  el('selectVisible').checked = false;
-}
-
-function getSelectedSeqs() {
-  return [...document.querySelectorAll('.rowCheck:checked')]
-    .map(x => Number(x.dataset.seq))
-    .filter(Boolean);
-}
-
-function moveSelectedTo(cat) {
-  const selected = new Set(getSelectedSeqs());
-
-  if (!selected.size) {
-    setMsg('Select one or more rows first, or use Select visible after searching.', 'err');
-    return;
-  }
-
-  for (const t of state.transactions) {
-    if (selected.has(Number(t._globalSeq))) {
-      t.cat = cat;
-      t.sub = 'user_reviewed';
-
-      if (cat === 'income') {
-        t.type = 'credit';
-        t.excluded_from_pl = false;
-      } else if (cat === 'savings_investments') {
-        t.type = 'saving_or_investment';
-        t.excluded_from_pl = false;
-      } else if (cat === 'internal_transfer') {
-        t.type = 'ignored_transfer';
-        t.excluded_from_pl = true;
-      } else {
-        t.type = 'debit';
-        t.excluded_from_pl = false;
-      }
-
-      t.user_classified = true;
-    }
-  }
-
-  saveState();
-  renderDashboard();
-
-  setMsg(`<b>Updated.</b> Moved ${selected.size} selected transaction(s) to ${labelCategory(cat)}.`, 'ok');
-}
-
-el('selectVisible').onchange = e => {
-  document.querySelectorAll('.rowCheck').forEach(x => {
-    x.checked = e.target.checked;
-  });
-};
-
-el('moveIncome').onclick = () => moveSelectedTo('income');
-el('moveExpense').onclick = () => moveSelectedTo('expenses');
-el('moveSavings').onclick = () => moveSelectedTo('savings_investments');
-el('moveIgnored').onclick = () => moveSelectedTo('internal_transfer');
-
-el('search').oninput = renderTable;
-el('catFilter').onchange = renderTable;
-
-el('clearBtn').onclick = () => {
-  state.transactions = [];
-  state.files = [];
-  state.fileStats = [];
-
-  localStorage.removeItem(STORAGE_KEY);
-
-  renderFiles();
-
-  el('dashboard').style.display = 'none';
-  el('qualityPanel').style.display = 'none';
-  el('insightPanel').style.display = 'none';
-
-  setStep(0);
-  setMsg('Cleared. Upload files to start again.');
-};
-
-el('downloadCsv').onclick = () => {
-  const cols = [
-    'seq',
-    'date',
-    'merchant',
-    'amount',
-    'currency',
-    'direction',
-    'cat',
-    'sub',
-    'type',
-    'freq',
-    'file',
-    'parser',
-    'excluded_from_pl',
-    'user_classified',
-    'raw'
-  ];
-
-  const lines = [cols.join(',')].concat(
-    state.transactions.map(t =>
-      cols.map(k =>
-        csvCell(
-          k === 'seq'
-            ? t._globalSeq
-            : k === 'file'
-              ? t._file
-              : t[k]
-        )
-      ).join(',')
-    )
-  );
-
-  const blob = new Blob([lines.join('\n')], {
-    type: 'text/csv'
-  });
-
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob);
-  a.download = 'wyz_transactions.csv';
-  a.click();
-
-  URL.revokeObjectURL(a.href);
-};
-
-function requestInsight() {
-  const local = localInsights();
-
-  el('insightHeadline').textContent = 'Review your cash flow';
-  el('insightDetail').innerHTML = `<ul>${local.map(x => `<li>${escapeHtml(x)}</li>`).join('')}</ul>`;
-  el('insightPanel').style.display = 'block';
-}
-
-function localInsights() {
-  const out = [];
-  const totals = summarize(state.transactions);
-  const monthly = monthlySeries(state.transactions);
-
-  out.push(`Current P/L is ${money(totals.pl)} after income, expenses, and user-classified savings. Ignored transfers are excluded.`);
-
-  const reviewFiles = (state.fileStats || []).filter(x => {
-    const s = x.parse_report?.status;
-    return s && s !== 'ok';
-  });
-
-  if (reviewFiles.length) {
-    out.push(`${reviewFiles.length} file(s) need review in the parse quality report before fully trusting totals.`);
-  }
-
-  const best = [...monthly].sort((a,b) => b.pl - a.pl)[0];
-  const worst = [...monthly].sort((a,b) => a.pl - b.pl)[0];
-
-  if (best) out.push(`Best month by P/L: ${best.label} at ${money(best.pl)}.`);
-  if (worst && (!best || worst.month !== best.month)) out.push(`Weakest month by P/L: ${worst.label} at ${money(worst.pl)}.`);
-
-  const savingsRows = state.transactions.filter(t => t.cat === 'savings_investments');
-  const ignoredRows = state.transactions.filter(t => t.cat === 'internal_transfer');
-
-  if (savingsRows.length) {
-    out.push(`${savingsRows.length} transaction(s) have been manually classified as Savings.`);
-  } else {
-    out.push('Tip: search for savings/investment transactions, select visible rows, and move them to Savings.');
-  }
-
-  if (ignoredRows.length) {
-    out.push(`${ignoredRows.length} transaction(s) are currently ignored from P/L.`);
-  }
-
-  return out.slice(0, 6);
-}
-
-function saveState() {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({
-      transactions: state.transactions,
-      fileStats: state.fileStats,
-      savedAt: new Date().toISOString()
-    }));
-  } catch (e) {
-    console.warn('Save failed', e);
-  }
-}
-
-function restoreState() {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return;
-
-    const saved = JSON.parse(raw);
-
-    if (!Array.isArray(saved.transactions) || !saved.transactions.length) return;
-
-    state.transactions = saved.transactions;
-    state.fileStats = saved.fileStats || [];
-
-    state.transactions.forEach((t, i) => {
-      t._globalSeq = i + 1;
+    const res = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+      },
+      signal: controller.signal,
+      body: JSON.stringify({
+        model: MODEL,
+        max_tokens: maxTokens,
+        messages: [
+          {
+            role: 'user',
+            content: `${prompt}\n\n${userContent}`,
+          },
+        ],
+      }),
     });
 
-    renderDashboard();
-    requestInsight();
+    clearTimeout(timer);
 
-    setMsg(`<b>Restored saved dashboard.</b> ${state.transactions.length} transactions are available. Upload more files to append new data, or Clear to reset.`, 'ok');
-  } catch (e) {
-    console.warn('Restore failed', e);
+    if (!res.ok) {
+      const body = await res.text();
+      throw new Error(`claude_error:${res.status}:${body.slice(0, 180)}`);
+    }
+
+    const data = await res.json();
+
+    return data?.content?.[0]?.text || '';
+  } catch (err) {
+    clearTimeout(timer);
+
+    if (err.name === 'AbortError') {
+      throw new Error('timeout: Claude took too long');
+    }
+
+    throw err;
   }
 }
 
-function csvCell(v) {
-  const s = String(v ?? '');
-  return /[",\n]/.test(s)
-    ? '"' + s.replace(/"/g, '""') + '"'
-    : s;
+function parseJsonObject(raw) {
+  if (!raw) return null;
+
+  const clean = String(raw).replace(/```json|```/g, '').trim();
+  const s = clean.indexOf('{');
+  const e = clean.lastIndexOf('}');
+
+  if (s < 0 || e < s) return null;
+
+  try {
+    return JSON.parse(clean.slice(s, e + 1));
+  } catch {
+    return null;
+  }
 }
 
-function escapeHtml(s) {
-  return String(s ?? '').replace(/[&<>"]/g, c => ({
-    '&':'&amp;',
-    '<':'&lt;',
-    '>':'&gt;',
-    '"':'&quot;'
-  }[c]));
+async function handleExtract(req, res) {
+  const { text, filename } = req.body || {};
+
+  if (!text || typeof text !== 'string') {
+    return res.status(400).json({
+      error: 'missing_text',
+      message: 'No readable text was provided. The PDF may be image-only, password-protected, or unsupported.',
+    });
+  }
+
+  if (text.length > REJECT_ABOVE_CHARS) {
+    return res.status(413).json({
+      error: 'file_too_large',
+      message: `Readable text is very large (${Math.round(text.length / 1000)}k chars). Split and retry.`,
+      size_chars: text.length,
+      limit_chars: REJECT_ABOVE_CHARS,
+    });
+  }
+
+  let input = text;
+  let wasTruncated = false;
+
+  if (input.length > MAX_TOTAL_CHARS) {
+    input = input.slice(0, MAX_TOTAL_CHARS);
+    wasTruncated = true;
+  }
+
+  const { parser, rows, cleaned, parse_report } = deterministicExtract(input, filename);
+  const summary = summarizeTransactions(rows);
+
+  const response = {
+    backend_version: 'strict-account-table-v6-discard-balance',
+    transactions: rows,
+    count: rows.length,
+    filename: filename || null,
+    parser,
+    deterministic: Boolean(parser),
+    text_chars: cleaned.length,
+    lines_detected: rows.length,
+    total_seq: rows.length,
+    skipped_lines: [],
+    summary,
+    parse_report,
+  };
+
+  if (wasTruncated) {
+    response.warning = `Text was truncated at ${MAX_TOTAL_CHARS} chars. Results may be incomplete.`;
+  }
+
+  if (rows.length === 0) {
+    response.warning = response.warning || 'No transactions found. This may be an image-only file, a non-statement document, or a format that needs another parser.';
+    response.diagnostic = {
+      sample_text: cleaned.slice(0, 700),
+      parse_report,
+    };
+  } else if (parse_report && parse_report.status !== 'ok') {
+    response.warning = parse_report.warnings[0] || 'Some transaction-table rows may need review.';
+  }
+
+  return res.status(200).json(response);
 }
 
-restoreState();
-</script>
-</body>
-</html>
+const INSIGHT_PROMPT = `You are a careful financial coach. Given generic categorized cash-flow data, write one short, useful observation. Do not assume merchant categories. Internal transfers are excluded from P/L. Output JSON only: {"headline":"...","detail":"...","tone":"neutral|warning|encouraging"}.`;
+
+async function handleInsight(req, res, apiKey) {
+  const { summary, transactions = [] } = req.body || {};
+  const effective = summary || summarizeTransactions(transactions);
+
+  try {
+    const raw = await callClaude({
+      prompt: INSIGHT_PROMPT,
+      userContent: JSON.stringify(effective, null, 2).slice(0, 9000),
+      apiKey,
+      maxTokens: INSIGHT_MAX_TOKENS,
+      timeoutMs: INSIGHT_TIMEOUT_MS,
+    });
+
+    const obj = parseJsonObject(raw);
+
+    if (!obj || !obj.headline) {
+      throw new Error('bad_insight_json');
+    }
+
+    return res.status(200).json({
+      headline: String(obj.headline).slice(0, 180),
+      detail: obj.detail ? String(obj.detail).slice(0, 300) : null,
+      tone: ['neutral', 'warning', 'encouraging'].includes(obj.tone) ? obj.tone : 'neutral',
+    });
+  } catch (err) {
+    return res.status(200).json({
+      headline: null,
+      detail: null,
+      tone: 'neutral',
+      warning: err.message,
+    });
+  }
+}
+
+export default async function handler(req, res) {
+  setCors(res);
+
+  if (req.method === 'OPTIONS') {
+    return res.status(200).end();
+  }
+
+  if (req.method !== 'POST') {
+    return res.status(405).json({
+      error: 'method_not_allowed',
+      message: 'Use POST',
+    });
+  }
+
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+
+  try {
+    const action = req.body?.action;
+
+    if (action === 'extract') {
+      return await handleExtract(req, res);
+    }
+
+    if (action === 'insight') {
+      return await handleInsight(req, res, apiKey);
+    }
+
+    return res.status(400).json({
+      error: 'bad_action',
+      message: 'Unknown action. Expected extract or insight.',
+    });
+  } catch (err) {
+    console.error('Handler error:', err);
+
+    return res.status(500).json({
+      error: 'unexpected',
+      message: err.message || 'Unexpected server error',
+    });
+  }
+}
