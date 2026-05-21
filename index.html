@@ -566,9 +566,9 @@ th{
       <h1>Upload your statements</h1>
       <p>PDF or CSV — credit cards, bank accounts and payslips. Account-statement balances are never used as transaction amounts and are checked only as a running-balance validation.</p>
 
-      <input id="fileInput" type="file" multiple accept=".pdf,.csv,.txt" hidden>
+      <input id="fileInput" type="file" multiple accept=".pdf,.csv,.txt" style="display:none">
 
-      <div id="drop" class="drop">
+      <label for="fileInput" id="drop" class="drop" style="display:block;cursor:pointer">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
           <path d="M12 16V4"/>
           <path d="m7 9 5-5 5 5"/>
@@ -581,7 +581,7 @@ th{
           <div class="chip">CSV</div>
           <div class="chip">TXT</div>
         </div>
-      </div>
+      </label>
 
       <div id="files" class="files"></div>
       <button id="analyzeBtn" class="primary" disabled>Analyse files</button>
@@ -761,7 +761,7 @@ const setMsg = (html, cls = '') => {
 pdfjsLib.GlobalWorkerOptions.workerSrc =
   'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
 
-el('drop').onclick = () => el('fileInput').click();
+// file picker opened natively by <label for='fileInput'>
 el('fileInput').onchange = e => addFiles([...e.target.files]);
 
 ['dragenter','dragover'].forEach(ev => {
@@ -778,7 +778,7 @@ el('fileInput').onchange = e => addFiles([...e.target.files]);
   });
 });
 
-el('drop').addEventListener('drop', e => addFiles([...e.dataTransfer.files]));
+el('drop').addEventListener('drop', e => { e.preventDefault(); e.stopPropagation(); addFiles([...e.dataTransfer.files]); });
 
 window.addEventListener('resize', () => {
   if (state.transactions.length) renderTrendChart();
