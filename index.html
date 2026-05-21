@@ -761,7 +761,7 @@ const setMsg = (html, cls = '') => {
 pdfjsLib.GlobalWorkerOptions.workerSrc =
   'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
 
-// file picker opened natively by <label for='fileInput'>
+// file picker triggered natively by <label for='fileInput'>
 el('fileInput').onchange = e => addFiles([...e.target.files]);
 
 ['dragenter','dragover'].forEach(ev => {
