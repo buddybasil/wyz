@@ -16,7 +16,7 @@ const INSIGHT_TIMEOUT_MS = 18000;
 const MAX_TOTAL_CHARS = 900000;
 const REJECT_ABOVE_CHARS = 1400000;
 
-const BACKEND_VERSION = 'strict-account-table-v11-ai-account-parser';
+const BACKEND_VERSION = 'strict-account-table-v14-user-decides';
 
 // Prompt sent to Claude Haiku to parse ADCB Islamic account statement rows.
 // The raw text from these PDFs has spatial extraction artefacts: timestamps
@@ -34,8 +34,12 @@ The PDF extraction is corrupted: amounts sometimes have a phantom '0' inserted b
 
 For each row, identify:
 1. The posting date (first date, YYYY-MM-DD format)
-2. Whether it is DR (debit, money out) or CR (credit, money in) — look at the description semantics: SALARY/CHEQUE DEPOSIT/B/O/MBTRF B/O/dividend = CR; ATM WDL/PUR/MBTRF AED TRF OUT/Installment Recovery/CREDIT CARD PAYMNT/FOREIGN TRANSACTION FEE/SEND MONEY = DR
-3. The transaction amount (not the balance) — correct phantom zeros: if a decimal number has a '0' immediately before the decimal point AND the result makes more sense as a transaction amount, remove it
+2. Whether it is DR (debit, money out) or CR (credit, money in) — use the column values, not just the description. The debit column has a non-zero value for DR rows, the credit column for CR rows. If you cannot read column values clearly, use these description patterns as a guide:
+   CR (credit, money in): SALARY, CHEQUE DEPOSIT, MBTRF B/O (incoming transfer), ADX DIVIDEND, B/O followed by a person's name you recognise as an incoming transfer
+   DR (debit, money out): ATM WDL, PUR, MBTRF AED TRF (outgoing transfer), Installment Recovery, CREDIT CARD PAYMNT, FOREIGN TRANSACTION FEE, SEND MONEY VIA AANI, I/W CLEARING CHEQUE, any purchase or bill payment
+   IMPORTANT: "B/O COMPANY NAME" (e.g. B/O APOLLO FLIGHT CENTRE LLC) is a DR — the debit was made "by order of" that company. Only "MBTRF B/O PERSON NAME" rows are incoming credits.
+   IMPORTANT: Cross-check direction using the running balance. If the balance goes DOWN after a row, it is DR. If the balance goes UP, it is CR. This overrides any description-based guess.
+3. The transaction amount — it is the non-zero value from either the debit or credit column (NOT the balance). The balance is always the last/largest number in the row. Correct phantom zeros in the amount if needed.
 4. The description (exclude dates, timestamps, reference numbers, and amounts)
 
 Return ONLY a JSON array, one object per input row, in the same order:
@@ -270,7 +274,9 @@ function looksLikeCreditCardStatement(text) {
 function isInternalTransferLike(t) {
   const m = String(t.merchant || '').toUpperCase();
 
-  // Credit-card settlements/payments.
+  // Auto-exclude ONLY card settlement pairs — these are the one case where
+  // the same money genuinely appears twice (once as a card spend, once as the
+  // account debit that pays the card). Everything else the user should decide.
   if (
     /PAYMENT\s*RECEIVED/.test(m) ||
     /PAYMENTRECEIVED/.test(m) ||
@@ -279,38 +285,6 @@ function isInternalTransferLike(t) {
     /CARD\s*PAYMENT/.test(m) ||
     /PAYMENT\s*TO\s*CARD/.test(m)
   ) {
-    return true;
-  }
-
-  // Self/family/person-to-person transfers.
-  if (
-    /\bTRF\s*OUT\s*TO\s+BASIL\s+ABRAHAM\b/.test(m) ||
-    /\bTRF\s*OUT\s*TO\s+BASIL\b/.test(m) ||
-    /\bTRF\s*OUT\s*TO\s+SEENA\s+BASIL\b/.test(m) ||
-    /\bTRF\s*OUT\s*TO\s+SEENA\b/.test(m) ||
-    /\bB\/O\s+BASIL\s+ABRAHAM\b/.test(m) ||
-    /\bB\/O\s+BASIL\b/.test(m) ||
-    /\bB\/O\s+SEENA\s+BASIL\b/.test(m) ||
-    /\bB\/O\s+SEENA\b/.test(m) ||
-    /\bSEND\s+MONEY\s+VIA\s+AANI\b/.test(m)
-  ) {
-    return true;
-  }
-
-  // Uncertain incoming credits: ignore first; user can manually move to Income after review.
-  if (
-    /\bB\/O\s+ALLIANCE\s+INSURANCE\b/.test(m) ||
-    /\bALLIANCE\s+INSURANCE\b/.test(m)
-  ) {
-    return true;
-  }
-
-  // ADCB Islamic account: recurring account-to-account debit entries that appear
-  // as long numeric account number descriptions (11200001...). These are internal
-  // financing/instalment debits and should not count as expenses in P&L.
-  // They carry corrupted amounts due to PDF extraction, so excluding them entirely
-  // is safer than surfacing wrong figures.
-  if (/^\d{25,}$/.test(m.replace(/\s/g, ''))) {
     return true;
   }
 
@@ -664,7 +638,7 @@ function removePhantomZero(n) {
 // but their sequence/cheque reference numbers appear before "00.00" in the
 // extracted text, which fools the zero-anchor logic into treating them as DR rows.
 // B/O (beneficiary-of) entries are always credits regardless of leading digits.
-const ACCT_FORCE_CR = /\b(SALARY|CHEQUE\s+DEPOSIT|B\/O\s)/i;
+const ACCT_FORCE_CR = /\b(SALARY|CHEQUE\s+DEPOSIT)\b/i;
 const ACCT_FORCE_DR = /^(ATM\s+WDL|PUR\s|FOREIGN\s+TRANSACTION|SEND\s+MONEY\s+VIA\s+AANI|I\/W\s+CLEARING\s+CHEQUE)/i;
 
 function parseAccountRecord(rec0) {
