@@ -557,7 +557,7 @@ th{
 <body>
 <header class="top">
   <div class="brand"><div class="logo">▰</div>Wyz</div>
-  <div class="pill">v9 · Balance checksum · Duplicate aware</div>
+  <div class="pill">v10 · Chunked upload · AI account parser</div>
 </header>
 
 <main class="wrap">
@@ -566,9 +566,9 @@ th{
       <h1>Upload your statements</h1>
       <p>PDF or CSV — credit cards, bank accounts and payslips. Account-statement balances are never used as transaction amounts and are checked only as a running-balance validation.</p>
 
-      <input id="fileInput" type="file" multiple accept=".pdf,.csv,.txt" hidden>
-
-      <div id="drop" class="drop">
+      <div id="drop" class="drop" style="position:relative">
+        <input id="fileInput" type="file" multiple accept=".pdf,.csv,.txt"
+          style="position:absolute;inset:0;width:100%;height:100%;opacity:0;cursor:pointer;z-index:2">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
           <path d="M12 16V4"/>
           <path d="m7 9 5-5 5 5"/>
@@ -761,7 +761,6 @@ const setMsg = (html, cls = '') => {
 pdfjsLib.GlobalWorkerOptions.workerSrc =
   'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
 
-el('drop').onclick = () => el('fileInput').click();
 el('fileInput').onchange = e => addFiles([...e.target.files]);
 
 ['dragenter','dragover'].forEach(ev => {
@@ -778,7 +777,7 @@ el('fileInput').onchange = e => addFiles([...e.target.files]);
   });
 });
 
-el('drop').addEventListener('drop', e => addFiles([...e.dataTransfer.files]));
+el('drop').addEventListener('drop', e => { e.preventDefault(); e.stopPropagation(); addFiles([...e.dataTransfer.files]); });
 
 window.addEventListener('resize', () => {
   if (state.transactions.length) renderTrendChart();
@@ -894,6 +893,75 @@ async function postJson(payload) {
   return data;
 }
 
+// Split extracted PDF text into ~25k-char chunks at natural date-line boundaries
+// so each chunk fits within Vercel's 60s per-request timeout.
+const CHUNK_SIZE = 25000;
+const MAX_CONCURRENT = 3;
+
+function splitTextIntoChunks(text) {
+  if (text.length <= CHUNK_SIZE) return [text];
+
+  const chunks = [];
+  let start = 0;
+
+  while (start < text.length) {
+    if (start + CHUNK_SIZE >= text.length) {
+      chunks.push(text.slice(start));
+      break;
+    }
+
+    // Look ahead up to 2000 chars for the next date line to split on
+    let splitAt = start + CHUNK_SIZE;
+    const window = text.slice(splitAt, splitAt + 2000);
+    const dateMatch = window.match(/
+(\d{1,2}[\/\-]\d{1,2}[\/\-]\d{4}|\d{4}[\/\-]\d{1,2}[\/\-]\d{1,2})/);
+    if (dateMatch) splitAt += dateMatch.index;
+
+    chunks.push(text.slice(start, splitAt));
+    start = splitAt;
+  }
+
+  return chunks.filter(c => c.trim());
+}
+
+// Send chunks concurrently (MAX_CONCURRENT at a time) and merge results.
+async function analyzeTextChunked(text, filename) {
+  const chunks = splitTextIntoChunks(text);
+
+  if (chunks.length === 1) {
+    return postJson({ action: 'extract', filename, text: chunks[0] });
+  }
+
+  const allTransactions = [];
+  let mergedReport = null;
+  let lastParser = null;
+  let lastVersion = null;
+
+  for (let i = 0; i < chunks.length; i += MAX_CONCURRENT) {
+    const batch = chunks.slice(i, i + MAX_CONCURRENT);
+    const results = await Promise.all(
+      batch.map(chunk => postJson({ action: 'extract', filename, text: chunk }))
+    );
+    for (const data of results) {
+      allTransactions.push(...(data.transactions || []));
+      lastParser = data.parser || lastParser;
+      lastVersion = data.backend_version || lastVersion;
+      if (!mergedReport) mergedReport = data.parse_report;
+    }
+  }
+
+  allTransactions.forEach((t, i) => { t.seq = i + 1; });
+
+  return {
+    transactions: allTransactions,
+    count: allTransactions.length,
+    parser: lastParser,
+    backend_version: lastVersion,
+    parse_report: mergedReport || { status: allTransactions.length ? 'ok' : 'failed' },
+    warning: null
+  };
+}
+
 el('analyzeBtn').onclick = async () => {
   el('analyzeBtn').disabled = true;
   setStep(0);
@@ -924,11 +992,7 @@ el('analyzeBtn').onclick = async () => {
       setStep(2);
       setMsg(`Parsing <b>${escapeHtml(file.name)}</b>...`);
 
-      const data = await postJson({
-        action: 'extract',
-        filename: file.name,
-        text
-      });
+      const data = await analyzeTextChunked(text, file.name);
 
       if (data.backend_version) {
         console.log('Wyz backend version:', data.backend_version);
