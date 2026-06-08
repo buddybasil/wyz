@@ -1,64 +1,24 @@
 // WYZ API - Generic Statement Analyzer
-// v14-user-decides:
-// - Credit-card statements: deterministic row parser using Amount + CR marker where present.
-// - Account statements: AI-assisted parser for messy ADCB-style extracted rows.
-// - Balance is NEVER used as transaction amount.
-// - Account-statement balance is validation context only.
-// - Auto-ignore is conservative: card payments / card settlements only.
-// - User decides savings, personal transfers, family transfers, uncertain credits, etc.
-// - Claude is used only for account-statement extraction and optional insights.
+// v15-deterministic-account-first
+//
+// Core fixes:
+// - Account statements are parsed deterministically first.
+// - Account statement amount is taken ONLY from Debit Amount or Credit Amount.
+// - Balance is never used as transaction amount.
+// - AI is no longer the primary parser for account statements.
+// - Parse quality for known transaction tables uses actual parser row logic, not loose date/amount noise.
+// - Credit card parser remains deterministic.
+// - User still decides savings, family/personal transfers, uncertain credits, etc.
+
+const BACKEND_VERSION = 'strict-account-table-v15-deterministic-account-first';
 
 const MODEL = 'claude-haiku-4-5-20251001';
 const INSIGHT_MAX_TOKENS = 450;
 const INSIGHT_TIMEOUT_MS = 18000;
-const ACCOUNT_AI_TIMEOUT_MS = 50000;
 const MAX_TOTAL_CHARS = 900000;
 const REJECT_ABOVE_CHARS = 1400000;
 
-const BACKEND_VERSION = 'strict-account-table-v14-user-decides';
-
 const NUM_SRC = String.raw`-?\(?\d{1,3}(?:,\d{3})*(?:\.\d+)?\)?|-?\(?\d+(?:\.\d+)?\)?|\.\d+`;
-
-const ACCOUNT_PARSE_PROMPT = `You are parsing rows from a UAE bank account statement.
-
-The input rows were extracted from a PDF and may be messy. Each row may contain:
-- Posting date and value date, usually DD/MM/YYYY
-- Optional timestamps like 03:39:59 that are NOT amounts
-- Description
-- Reference / cheque number
-- Debit amount
-- Credit amount
-- Running balance
-- Extra reference codes
-
-Rules:
-1. Return one JSON array item per input row, in the same order.
-2. The transaction amount must come only from the debit or credit column.
-3. Never use the running balance as the transaction amount.
-4. If debit is non-zero and credit is zero/blank, direction is DR.
-5. If credit is non-zero and debit is zero/blank, direction is CR.
-6. If the row cannot be parsed confidently, return null for that row.
-7. Description should be the transaction description only, without dates, timestamps, amounts, or running balance.
-8. If a reference / cheque number is obvious, include it in "reference"; otherwise use null.
-9. Correct obvious PDF extraction artefacts:
-   - standalone HH:MM or HH:MM:SS timestamps are not amounts
-   - phantom zero before decimal may occur, e.g. 43320.93 may mean 4332.93 if context/running balance proves it
-10. Use running balance only as a cross-check for direction/amount. Do not output balance as transaction amount.
-
-Return JSON only:
-[
-  {
-    "date": "YYYY-MM-DD",
-    "direction": "DR" or "CR",
-    "amount": number,
-    "description": "string",
-    "reference": "string or null",
-    "debit": number,
-    "credit": number,
-    "balance": number or null
-  },
-  null
-]`;
 
 function setCors(res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -69,11 +29,9 @@ function setCors(res) {
 function normalizeSpaces(s) {
   return String(s || '')
     .replace(/[\u200B-\u200D\uFEFF]/g, '')
-    .replace(/\uFFFE/g, '')
     .replace(/\uFFFD/g, '')
     .replace(/\uFFFC/g, '')
     .replace(/[ \t]+/g, ' ')
-    .replace(/\s+([,.:;])/g, '$1')
     .trim();
 }
 
@@ -82,7 +40,6 @@ function cleanStatementText(text) {
 
   let t = String(text).replace(/\r/g, '\n');
 
-  // Remove Arabic/Hebrew/Indic blocks that often duplicate English labels.
   t = t.replace(
     /[\u0590-\u05FF\u0600-\u06FF\u0700-\u074F\u0750-\u077F\u0780-\u07BF\u08A0-\u08FF\u0900-\u097F\uFB50-\uFDFF\uFE70-\uFEFF]/g,
     ' '
@@ -95,13 +52,14 @@ function cleanStatementText(text) {
   t = t.replace(/https?:\/\/\S+/g, ' ');
   t = t.replace(/[\w.-]+@[\w.-]+\.\w+/g, ' ');
 
-  // Account statement timestamp tokens can corrupt amounts when PDF text is spatially joined.
-  t = t.replace(/\b\d{1,2}:\d{2}(?::\d{2})?\b/g, ' ');
-
   t = t.replace(/[ \t]+/g, ' ');
   t = t.replace(/\n{3,}/g, '\n\n');
 
   return t.trim();
+}
+
+function stripTimeTokens(s) {
+  return String(s || '').replace(/\b\d{1,2}:\d{2}(?::\d{2})?\b/g, ' ');
 }
 
 function parseAmount(v) {
@@ -114,6 +72,8 @@ function parseAmount(v) {
   const cleaned = raw
     .replace(/,/g, '')
     .replace(/[^\d.\-()[\]]/g, '');
+
+  if (!cleaned) return 0;
 
   const n = Number(cleaned.replace(/[()[\]]/g, '').replace(/^-/, ''));
 
@@ -141,7 +101,6 @@ function isoFromAnyDate(s) {
   const a = Number(m[1]);
   const b = Number(m[2]);
 
-  // UAE statements are usually DD/MM/YYYY. If second part cannot be month, use MM/DD/YYYY.
   if (b > 12 && a <= 12) {
     return `${m[3]}-${String(a).padStart(2, '0')}-${String(b).padStart(2, '0')}`;
   }
@@ -157,9 +116,6 @@ function isNoiseLine(line) {
   const l = String(line || '').toLowerCase();
 
   return !line ||
-    l.includes('transaction date description') ||
-    (l.includes('transaction date') && l.includes('amount')) ||
-    l.includes('posting date value date description') ||
     l.includes('primary card number') ||
     l.includes('card holder name') ||
     l.includes('credit card statement') ||
@@ -173,28 +129,28 @@ function isNoiseLine(line) {
     l.includes('total outstanding balance') ||
     l.includes('credit limit') ||
     l.includes('available credit') ||
+    l.includes('cashlimit available') ||
+    l.includes('time-to-settle') ||
     l.includes('licensed by the central bank') ||
     l.includes('commercial bank of dubai psc') ||
-    l.includes('end_of_statement') ||
+    l.includes('for feedback/complaints') ||
+    l.includes('website:www.cbd.ae') ||
+    l.includes('end of statement') ||
     /^\*{3,}/.test(line);
 }
 
 function looksLikeBankAccountStatement(text) {
   const s = String(text || '').toUpperCase();
 
-  const hasAccountHeader =
+  return (
     /ACCOUNT\s+STATEMENT/.test(s) ||
-    /ACCOUNT\s+NUMBER/.test(s) ||
-    /ACCOUNT\s+NAME/.test(s);
-
-  const hasBankColumns =
+    /ACCOUNT\s+NUMBER/.test(s)
+  ) &&
     /POSTING\s+DATE/.test(s) &&
     /VALUE\s+DATE/.test(s) &&
     /DEBIT\s+AMOUNT/.test(s) &&
     /CREDIT\s+AMOUNT/.test(s) &&
     /BALANCE/.test(s);
-
-  return hasAccountHeader && hasBankColumns;
 }
 
 function looksLikeCreditCardStatement(text) {
@@ -203,22 +159,24 @@ function looksLikeCreditCardStatement(text) {
   return (
     /CREDIT\s+CARD\s+STATEMENT/.test(s) ||
     /STATEMENT\s+OF\s+ACCOUNT\s+-\s+CREDIT\s+CARD/.test(s) ||
-    /CARD\s+NUMBER/.test(s)
-  ) && /TRANSACTION\s+DATE/.test(s) && /AMOUNT/.test(s);
+    /CARD\s+NUMBER/.test(s) ||
+    /TRANSACTION\s+DATE\s+DESCRIPTION\s+CR\/DR\s+AMOUNT/.test(s)
+  ) &&
+    /TRANSACTION\s+DATE/.test(s) &&
+    /AMOUNT/.test(s);
 }
 
 function isInternalTransferLike(t) {
-  const m = String(t.merchant || '').toUpperCase();
+  const m = String(`${t.merchant || ''} ${t.reference || ''}`).toUpperCase();
 
-  // Conservative auto-ignore: only card settlement / card payment wording.
-  // Personal/family transfers are left for the user to decide manually.
   return (
     /PAYMENT\s*RECEIVED/.test(m) ||
     /PAYMENTRECEIVED/.test(m) ||
     /CREDIT\s*CARD\s*PAYMNT/.test(m) ||
     /CREDIT\s*CARD\s*PAYMENT/.test(m) ||
     /CARD\s*PAYMENT/.test(m) ||
-    /PAYMENT\s*TO\s*CARD/.test(m)
+    /PAYMENT\s*TO\s*CARD/.test(m) ||
+    /FTS\s*&\s*SWIFT/.test(m)
   );
 }
 
@@ -300,7 +258,6 @@ function makeTxn({
   }
 
   if (validation) txn.validation = validation;
-
   if (raw) txn.raw = normalizeSpaces(raw).slice(0, 900);
 
   return categorizeTxn(txn);
@@ -308,124 +265,6 @@ function makeTxn({
 
 function compactRows(rows) {
   return rows.filter(Boolean);
-}
-
-function parseTaggedSingleDate(text) {
-  const rows = [];
-  const lines = text.split(/\n+/).map(normalizeSpaces).filter(Boolean);
-
-  const date = '(?:\\d{1,2}[\\/\\-]\\d{1,2}[\\/\\-]\\d{4}|\\d{4}[\\/\\-]\\d{1,2}[\\/\\-]\\d{1,2})';
-
-  const re = new RegExp(
-    `^(${date})\\s+(.+?)\\s+(DR|CR|D|C|DEBIT|CREDIT)\\s+(-?\\(?[\\d,]+(?:\\.\\d+)?\\)?|-?\\(?\\.\\d+\\)?)$`,
-    'i'
-  );
-
-  for (const line of lines) {
-    if (isNoiseLine(line)) continue;
-
-    const m = line.match(re);
-    if (!m) continue;
-
-    const dateIso = isoFromAnyDate(m[1]);
-    const amount = parseAmount(m[4]);
-
-    if (!dateIso || amount <= 0) continue;
-
-    rows.push(makeTxn({
-      date: dateIso,
-      merchant: m[2],
-      amount,
-      direction: /^(CR|C|CREDIT)$/i.test(m[3]) ? 'CR' : 'DR',
-      parser: 'tagged_single_date',
-      statement_type: 'generic',
-      raw: line,
-    }));
-  }
-
-  return compactRows(rows);
-}
-
-function parseTwoDateCard(text) {
-  const rows = [];
-  const lines = text.split(/\n+/).map(normalizeSpaces).filter(Boolean);
-
-  const date = '(?:\\d{1,2}[\\/\\-]\\d{1,2}[\\/\\-]\\d{4}|\\d{4}[\\/\\-]\\d{1,2}[\\/\\-]\\d{1,2})';
-
-  const re = new RegExp(
-    `^(${date})\\s+(${date})\\s+(.+?)\\s+(-?\\(?[\\d,]+(?:\\.\\d+)?\\)?|-?\\(?\\.\\d+\\)?)\\s*(CR|DR|C|D|CREDIT|DEBIT)?$`,
-    'i'
-  );
-
-  for (const line of lines) {
-    if (isNoiseLine(line)) continue;
-    if (/^\d{6}\*+\d+\s*-/.test(line)) continue;
-
-    const m = line.match(re);
-    if (!m) continue;
-
-    const dateIso = isoFromAnyDate(m[1]);
-    const desc = m[3];
-    const signed = parseSignedAmount(m[4]);
-    const marker = (m[5] || '').toUpperCase();
-
-    if (!dateIso || signed.amount <= 0) continue;
-
-    let direction = 'DR';
-
-    if (/^(CR|C|CREDIT)$/.test(marker)) direction = 'CR';
-    else if (/^(DR|D|DEBIT)$/.test(marker)) direction = 'DR';
-    else if (signed.isNegative) direction = 'DR';
-    else if (/\b(payment received|paymentreceived|refund|reversal|cashback|credit adjustment)\b/i.test(desc)) direction = 'CR';
-
-    rows.push(makeTxn({
-      date: dateIso,
-      merchant: desc,
-      amount: signed.amount,
-      direction,
-      parser: 'two_date_card',
-      statement_type: 'credit_card',
-      raw: line,
-    }));
-  }
-
-  return compactRows(rows);
-}
-
-function parseSignedAmountRows(text) {
-  const rows = [];
-  const lines = text.split(/\n+/).map(normalizeSpaces).filter(Boolean);
-
-  const date = '(?:\\d{1,2}[\\/\\-]\\d{1,2}[\\/\\-]\\d{4}|\\d{4}[\\/\\-]\\d{1,2}[\\/\\-]\\d{1,2})';
-
-  const re = new RegExp(
-    `^(${date})\\s+(.+?)\\s+(-\\(?[\\d,]+(?:\\.\\d+)?\\)?|\\([\\d,]+(?:\\.\\d+)?\\))\\s*(?:[A-Z]{3})?(?:\\s+[-\\d,.()]+)?$`,
-    'i'
-  );
-
-  for (const line of lines) {
-    if (isNoiseLine(line)) continue;
-
-    const m = line.match(re);
-    if (!m) continue;
-
-    const dateIso = isoFromAnyDate(m[1]);
-    const signed = parseSignedAmount(m[3]);
-
-    if (!dateIso || signed.amount <= 0) continue;
-
-    rows.push(makeTxn({
-      date: dateIso,
-      merchant: m[2],
-      amount: signed.amount,
-      direction: signed.isNegative ? 'DR' : 'CR',
-      parser: 'signed_amount',
-      statement_type: 'generic',
-      raw: line,
-    }));
-  }
-
-  return compactRows(rows);
 }
 
 function parseCsvLike(text) {
@@ -522,6 +361,124 @@ function parseCsvLike(text) {
   return compactRows(rows);
 }
 
+function parseTaggedSingleDate(text) {
+  const rows = [];
+  const lines = text.split(/\n+/).map(normalizeSpaces).filter(Boolean);
+
+  const date = '(?:\\d{1,2}[\\/\\-]\\d{1,2}[\\/\\-]\\d{4}|\\d{4}[\\/\\-]\\d{1,2}[\\/\\-]\\d{1,2})';
+
+  const re = new RegExp(
+    `^(${date})\\s+(.+?)\\s+(DR|CR|D|C|DEBIT|CREDIT)\\s+(-?\\(?[\\d,]+(?:\\.\\d+)?\\)?|-?\\(?\\.\\d+\\)?)$`,
+    'i'
+  );
+
+  for (const line of lines) {
+    if (isNoiseLine(line)) continue;
+
+    const m = line.match(re);
+    if (!m) continue;
+
+    const dateIso = isoFromAnyDate(m[1]);
+    const amount = parseAmount(m[4]);
+
+    if (!dateIso || amount <= 0) continue;
+
+    rows.push(makeTxn({
+      date: dateIso,
+      merchant: m[2],
+      amount,
+      direction: /^(CR|C|CREDIT)$/i.test(m[3]) ? 'CR' : 'DR',
+      parser: 'tagged_single_date',
+      statement_type: 'credit_card',
+      raw: line,
+    }));
+  }
+
+  return compactRows(rows);
+}
+
+function parseTwoDateCard(text) {
+  const rows = [];
+  const lines = text.split(/\n+/).map(normalizeSpaces).filter(Boolean);
+
+  const date = '(?:\\d{1,2}[\\/\\-]\\d{1,2}[\\/\\-]\\d{4}|\\d{4}[\\/\\-]\\d{1,2}[\\/\\-]\\d{1,2})';
+
+  const re = new RegExp(
+    `^(${date})\\s+(${date})\\s+(.+?)\\s+(-?\\(?[\\d,]+(?:\\.\\d+)?\\)?|-?\\(?\\.\\d+\\)?)\\s*(CR|DR|C|D|CREDIT|DEBIT)?$`,
+    'i'
+  );
+
+  for (const line of lines) {
+    if (isNoiseLine(line)) continue;
+    if (/^\d{6}\*+\d+/.test(line)) continue;
+
+    const m = line.match(re);
+    if (!m) continue;
+
+    const dateIso = isoFromAnyDate(m[1]);
+    const desc = m[3];
+    const signed = parseSignedAmount(m[4]);
+    const marker = (m[5] || '').toUpperCase();
+
+    if (!dateIso || signed.amount <= 0) continue;
+
+    let direction = 'DR';
+
+    if (/^(CR|C|CREDIT)$/.test(marker)) direction = 'CR';
+    else if (/^(DR|D|DEBIT)$/.test(marker)) direction = 'DR';
+    else if (signed.isNegative) direction = 'DR';
+    else if (/\b(payment received|paymentreceived|refund|reversal|cashback|credit adjustment)\b/i.test(desc)) direction = 'CR';
+
+    rows.push(makeTxn({
+      date: dateIso,
+      merchant: desc,
+      amount: signed.amount,
+      direction,
+      parser: 'two_date_card',
+      statement_type: 'credit_card',
+      raw: line,
+    }));
+  }
+
+  return compactRows(rows);
+}
+
+function parseSignedAmountRows(text) {
+  const rows = [];
+  const lines = text.split(/\n+/).map(normalizeSpaces).filter(Boolean);
+
+  const date = '(?:\\d{1,2}[\\/\\-]\\d{1,2}[\\/\\-]\\d{4}|\\d{4}[\\/\\-]\\d{1,2}[\\/\\-]\\d{1,2})';
+
+  const re = new RegExp(
+    `^(${date})\\s+(.+?)\\s+(-\\(?[\\d,]+(?:\\.\\d+)?\\)?|\\([\\d,]+(?:\\.\\d+)?\\))\\s*(?:[A-Z]{3})?(?:\\s+[-\\d,.()]+)?$`,
+    'i'
+  );
+
+  for (const line of lines) {
+    if (isNoiseLine(line)) continue;
+
+    const m = line.match(re);
+    if (!m) continue;
+
+    const dateIso = isoFromAnyDate(m[1]);
+    const signed = parseSignedAmount(m[3]);
+
+    if (!dateIso || signed.amount <= 0) continue;
+
+    rows.push(makeTxn({
+      date: dateIso,
+      merchant: m[2],
+      amount: signed.amount,
+      direction: signed.isNegative ? 'DR' : 'CR',
+      parser: 'signed_amount',
+      statement_type: 'generic',
+      raw: line,
+    }));
+  }
+
+  return compactRows(rows);
+}
+
 function parsePayslip(text) {
   if (!/payslip|payroll|net\s+pay/i.test(text)) return [];
 
@@ -562,6 +519,7 @@ function fixAccountAmountOcr(s) {
 
 function accountRecordStartRegex() {
   const datePat = '(?:\\d{1,2}[\\/\\-]\\d{1,2}[\\/\\-]\\d{4}|\\d{4}[\\/\\-]\\d{1,2}[\\/\\-]\\d{1,2})';
+
   return new RegExp(`^${datePat}(?:\\s+\\d{1,2}:\\d{2}(?::\\d{2})?)?(?:\\s+${datePat})?\\b`);
 }
 
@@ -577,7 +535,8 @@ function extractAccountRecords(text) {
 
   function flush() {
     if (current.length) {
-      records.push(current.join(' '));
+      const rec = normalizeSpaces(current.join(' '));
+      if (rec) records.push(rec);
       current = [];
     }
   }
@@ -600,36 +559,42 @@ function extractAccountRecords(text) {
   return records;
 }
 
-function extractNumsWithPosition(rest) {
+function extractAmountTokens(s) {
   const amountRe = new RegExp(`(^|\\s)(${NUM_SRC})(?=\\s|$)`, 'g');
-  const nums = [];
+  const out = [];
 
-  for (const m of rest.matchAll(amountRe)) {
-    const prefix = m[1] || '';
-    const value = m[2];
-    const start = m.index + prefix.length;
-    const end = start + value.length;
+  for (const m of String(s || '').matchAll(amountRe)) {
+    const raw = m[2];
+    const val = parseAmount(raw);
 
-    nums.push({
-      value,
-      amount: parseAmount(value),
-      start,
-      end,
+    if (!Number.isFinite(val)) continue;
+
+    out.push({
+      raw,
+      amount: val,
+      start: m.index + (m[1] || '').length,
+      end: m.index + (m[1] || '').length + raw.length,
     });
   }
 
-  return nums;
+  return out;
 }
 
-function removePhantomZero(n) {
-  const s = Number(n).toFixed(10).replace(/\.?0+$/, '');
-  const m = s.match(/^(\d{2,})0\.(\d+)$/);
-  if (m && parseInt(m[2], 10) > 0) return parseFloat(`${m[1]}.${m[2]}`);
-  return n;
+function isReferenceAmountLike(raw, amount) {
+  const s = String(raw || '').replace(/[^\d]/g, '');
+
+  if (!s) return false;
+
+  return s.length >= 7 && Number.isInteger(amount);
 }
 
-const ACCT_FORCE_CR = /\b(SALARY|CHEQUE\s+DEPOSIT)\b/i;
-const ACCT_FORCE_DR = /^(ATM\s+WDL|PUR\s|FOREIGN\s+TRANSACTION|SEND\s+MONEY\s+VIA\s+AANI|I\/W\s+CLEARING\s+CHEQUE|CREDIT\s+CARD\s+PAYMNT|CREDIT\s+CARD\s+PAYMENT)/i;
+function removeLastTokenFromText(text, token) {
+  const idx = String(text).lastIndexOf(token.raw);
+
+  if (idx < 0) return text;
+
+  return normalizeSpaces(String(text).slice(0, idx) + ' ' + String(text).slice(idx + token.raw.length));
+}
 
 function splitAccountDescriptionAndReference(body) {
   const text = normalizeSpaces(body);
@@ -665,7 +630,7 @@ function splitAccountDescriptionAndReference(body) {
     };
   }
 
-  m = text.match(/^(.*?\b3342)\s+(\d{5,}(?:\s+[A-Z0-9]+)*)$/i);
+  m = text.match(/^(.*?\b3342)\s+(\d{4,})$/i);
   if (m) {
     return {
       description: normalizeSpaces(m[1]),
@@ -697,14 +662,6 @@ function splitAccountDescriptionAndReference(body) {
     };
   }
 
-  m = text.match(/^(\d{12,})\s+(.+)$/i);
-  if (m) {
-    return {
-      description: normalizeSpaces(m[1]),
-      reference: normalizeSpaces(m[2]),
-    };
-  }
-
   return {
     description: text,
     reference: null,
@@ -714,10 +671,7 @@ function splitAccountDescriptionAndReference(body) {
 function parseAccountRecordDeterministic(rec0) {
   const datePat = '(?:\\d{1,2}[\\/\\-]\\d{1,2}[\\/\\-]\\d{4}|\\d{4}[\\/\\-]\\d{1,2}[\\/\\-]\\d{1,2})';
 
-  const rec = normalizeSpaces(fixAccountAmountOcr(
-    String(rec0 || '').replace(/\b\d{1,2}:\d{2}(?::\d{2})?\b/g, ' ')
-  ));
-
+  const rec = normalizeSpaces(fixAccountAmountOcr(stripTimeTokens(rec0)));
   if (!rec) return null;
 
   const dateMatches = [...rec.matchAll(new RegExp(datePat, 'g'))];
@@ -733,65 +687,47 @@ function parseAccountRecordDeterministic(rec0) {
     rest = rest.slice(secondDate[0].length).trim();
   }
 
-  const zeroMarker = rest.match(/(?<![.\d])(0+\.00)(?![.\d])/);
-  if (!zeroMarker) return null;
+  // Account-table structure after dates:
+  // Description + Ref/Cheque + Debit + Credit + Balance
+  //
+  // We identify the last 3 monetary columns. The last is balance.
+  // The first two among the last 3 are Debit and Credit.
+  // Balance is validation context only and never used as transaction amount.
+  const allTokens = extractAmountTokens(rest)
+    .filter(t => t.amount >= 0)
+    .filter(t => !isReferenceAmountLike(t.raw, t.amount));
 
-  const zeroIdx = zeroMarker.index;
-  const afterIdx = zeroIdx + zeroMarker[0].length;
-  const beforeStr = rest.slice(0, zeroIdx).trim();
-  const afterStr = rest.slice(afterIdx).trim();
+  if (allTokens.length < 3) return null;
 
-  function extractAmountNums(s) {
-    const amountRe = new RegExp(`(^|\\s)(${NUM_SRC})(?=\\s|$)`, 'g');
-    const out = [];
+  const last3 = allTokens.slice(-3);
+  const debitToken = last3[0];
+  const creditToken = last3[1];
+  const balanceToken = last3[2];
 
-    for (const m of s.matchAll(amountRe)) {
-      const v = parseAmount(m[2]);
-      const isRef = v >= 1000000 && Number.isInteger(v);
-      if (!isRef) {
-        out.push({
-          raw: m[2],
-          amount: v,
-          start: m.index + m[1].length,
-        });
-      }
-    }
+  const debit = parseAmount(debitToken.raw);
+  const credit = parseAmount(creditToken.raw);
+  const balance = parseAmount(balanceToken.raw);
 
-    return out;
-  }
+  let direction = null;
+  let amount = 0;
 
-  const beforeNums = extractAmountNums(beforeStr);
-  const afterNums = extractAmountNums(afterStr);
-
-  const forceCR = ACCT_FORCE_CR.test(beforeStr);
-  const forceDR = ACCT_FORCE_DR.test(beforeStr);
-
-  let amount;
-  let direction;
-  let body;
-  let balanceRaw = null;
-
-  if (forceCR || (!forceDR && beforeNums.length === 0)) {
-    if (afterNums.length === 0) return null;
-
-    amount = removePhantomZero(afterNums[0].amount);
-    direction = 'CR';
-    body = beforeStr;
-    balanceRaw = afterNums.length > 1 ? removePhantomZero(afterNums[1].amount) : null;
-  } else {
-    if (beforeNums.length === 0) return null;
-
-    const debitToken = beforeNums[beforeNums.length - 1];
-    amount = removePhantomZero(debitToken.amount);
+  if (debit > 0 && credit === 0) {
     direction = 'DR';
-
-    const pos = beforeStr.lastIndexOf(debitToken.raw, debitToken.start + debitToken.raw.length);
-    body = normalizeSpaces(beforeStr.slice(0, pos >= 0 ? pos : beforeStr.length));
-    balanceRaw = afterNums.length > 0 ? removePhantomZero(afterNums[0].amount) : null;
+    amount = debit;
+  } else if (credit > 0 && debit === 0) {
+    direction = 'CR';
+    amount = credit;
+  } else if (debit > 0 && credit > 0) {
+    return null;
+  } else {
+    return null;
   }
 
   if (!amount || amount <= 0) return null;
 
+  let body = rest.slice(0, debitToken.start).trim();
+
+  // Some extracted rows put ref after description before amount; keep it separated where possible.
   const split = splitAccountDescriptionAndReference(body);
 
   if (!split.description || split.description.length < 2) return null;
@@ -804,11 +740,12 @@ function parseAccountRecordDeterministic(rec0) {
     direction,
     debit: direction === 'DR' ? Math.round(amount * 100) / 100 : 0,
     credit: direction === 'CR' ? Math.round(amount * 100) / 100 : 0,
-    balance: balanceRaw != null ? Math.round(balanceRaw * 100) / 100 : null,
+    balance: Math.round(balance * 100) / 100,
     raw: rec,
     validation: {
-      balance_check: 'pending',
+      balance_check: 'not_checked',
       balance_used_as_amount: false,
+      amount_source: direction === 'DR' ? 'debit_column' : 'credit_column',
     },
   };
 }
@@ -822,7 +759,6 @@ function validateRunningBalances(parsed) {
     const cur = parsed[i];
 
     if (!cur.validation) cur.validation = {};
-
     cur.validation.balance_check = 'not_checked';
 
     if (cur.balance == null || !Number.isFinite(Number(cur.balance))) {
@@ -845,19 +781,20 @@ function validateRunningBalances(parsed) {
     if (diff <= tolerance) {
       cur.validation.balance_check = 'passed_reverse_order';
       cur.validation.balance_diff = Math.round(diff * 100) / 100;
+      continue;
+    }
+
+    const expectedCurrentBalance =
+      Number(nextOlder.balance) - Number(cur.debit || 0) + Number(cur.credit || 0);
+
+    const diff2 = Math.abs(expectedCurrentBalance - Number(cur.balance));
+
+    if (diff2 <= tolerance) {
+      cur.validation.balance_check = 'passed_forward_order';
+      cur.validation.balance_diff = Math.round(diff2 * 100) / 100;
     } else {
-      const expectedCurrentBalance =
-        Number(nextOlder.balance) - Number(cur.debit || 0) + Number(cur.credit || 0);
-
-      const diff2 = Math.abs(expectedCurrentBalance - Number(cur.balance));
-
-      if (diff2 <= tolerance) {
-        cur.validation.balance_check = 'passed_forward_order';
-        cur.validation.balance_diff = Math.round(diff2 * 100) / 100;
-      } else {
-        cur.validation.balance_check = 'failed';
-        cur.validation.balance_diff = Math.round(Math.min(diff, diff2) * 100) / 100;
-      }
+      cur.validation.balance_check = 'failed';
+      cur.validation.balance_diff = Math.round(Math.min(diff, diff2) * 100) / 100;
     }
   }
 
@@ -890,89 +827,10 @@ function parseAccountTableDeterministic(text) {
     validation: r.validation,
   }));
 
-  return compactRows(rows);
-}
-
-async function parseAccountTableWithAI(records, apiKey) {
-  if (!records.length || !apiKey) return [];
-
-  const chunkSize = 35;
-  const out = [];
-
-  for (let i = 0; i < records.length; i += chunkSize) {
-    const chunk = records.slice(i, i + chunkSize);
-    const userContent = chunk.map((r, idx) => `${idx + 1}. ${r}`).join('\n');
-
-    let raw;
-
-    try {
-      raw = await callClaude({
-        prompt: ACCOUNT_PARSE_PROMPT,
-        userContent,
-        apiKey,
-        maxTokens: 3000,
-        timeoutMs: ACCOUNT_AI_TIMEOUT_MS,
-      });
-    } catch (err) {
-      console.error('AI account parse failed:', err.message);
-      for (let j = 0; j < chunk.length; j++) out.push(null);
-      continue;
-    }
-
-    let parsed = null;
-
-    try {
-      const clean = String(raw || '').replace(/```json|```/g, '').trim();
-      const s = clean.indexOf('[');
-      const e = clean.lastIndexOf(']');
-
-      if (s >= 0 && e > s) {
-        parsed = JSON.parse(clean.slice(s, e + 1));
-      }
-    } catch {
-      parsed = null;
-    }
-
-    if (!Array.isArray(parsed)) {
-      for (let j = 0; j < chunk.length; j++) out.push(null);
-      continue;
-    }
-
-    for (let j = 0; j < chunk.length; j++) {
-      const p = parsed[j];
-
-      if (!p || typeof p !== 'object') {
-        out.push(null);
-        continue;
-      }
-
-      const direction = p.direction === 'CR' ? 'CR' : 'DR';
-      const amount = Number(p.amount) || 0;
-
-      const txn = makeTxn({
-        date: p.date || null,
-        merchant: p.description || 'Unknown',
-        reference: p.reference || null,
-        amount,
-        direction,
-        currency: 'AED',
-        parser: 'account_table_ai',
-        statement_type: 'bank_account',
-        raw: chunk[j],
-        debit: Number(p.debit) || (direction === 'DR' ? amount : 0),
-        credit: Number(p.credit) || (direction === 'CR' ? amount : 0),
-        balance: p.balance == null ? null : Number(p.balance),
-        validation: {
-          balance_check: 'ai_parsed',
-          balance_used_as_amount: false,
-        },
-      });
-
-      out.push(txn || null);
-    }
-  }
-
-  return out.filter(Boolean);
+  return {
+    rows: compactRows(rows),
+    records,
+  };
 }
 
 function dedupePreserveOrder(items) {
@@ -998,15 +856,7 @@ function dedupePreserveOrder(items) {
   return out;
 }
 
-function scoreParse(rows, text) {
-  if (!rows.length) return 0;
-
-  const dateCount = (String(text).match(/\b(?:\d{1,2}[\/\-]\d{1,2}[\/\-]\d{4}|\d{4}[\/\-]\d{1,2}[\/\-]\d{1,2})\b/g) || []).length;
-
-  return rows.length / Math.max(1, Math.min(dateCount, rows.length + 20));
-}
-
-function countCandidateRows(text) {
+function countCandidateRowsLoose(text) {
   const lines = String(text || '')
     .split(/\n+/)
     .map(normalizeSpaces)
@@ -1019,7 +869,7 @@ function countCandidateRows(text) {
   for (const line of lines) {
     const hasDate = /\b(?:\d{1,2}[\/\-]\d{1,2}[\/\-]\d{4}|\d{4}[\/\-]\d{1,2}[\/\-]\d{1,2})\b/.test(line);
     const money = line.match(amountTokenRegex()) || [];
-    const hasMoneyWords = /\b(DR|CR|DEBIT|CREDIT|WITHDRAWAL|DEPOSIT|PAID\s*OUT|PAID\s*IN|MONEY\s*OUT|MONEY\s*IN|BALANCE)\b/i.test(line);
+    const hasMoneyWords = /\b(DR|CR|DEBIT|CREDIT|WITHDRAWAL|DEPOSIT|PAID\s*OUT|PAID\s*IN|BALANCE)\b/i.test(line);
 
     if (hasDate && (money.length >= 1 || hasMoneyWords)) {
       count++;
@@ -1033,97 +883,31 @@ function countCandidateRows(text) {
   };
 }
 
-function extractTransactionTableRegion(text) {
-  const lines = String(text || '')
-    .split(/\n+/)
-    .map(normalizeSpaces)
-    .filter(Boolean);
-
-  if (!lines.length) {
-    return {
-      text: '',
-      found: false,
-      reason: 'empty_text',
-      startIndex: -1,
-      endIndex: -1,
-    };
-  }
-
-  const startPatterns = [
-    /Transaction Date/i,
-    /Posting Date\s+Value Date\s+Description/i,
-    /Transaction Description/i,
-    /Debit Amount\s+Credit Amount\s+Balance/i,
-    /Amount in AED/i,
-  ];
-
-  const endPatterns = [
-    /\*{3,}\s*END\s*OF\s*STATEMENT\s*\*{3,}/i,
-    /General Terms and Important Information/i,
-    /Commercial Bank of Dubai PSC/i,
-    /licensed by the Central Bank/i,
-  ];
-
-  let start = -1;
-
-  for (let i = 0; i < lines.length; i++) {
-    const windowText = lines.slice(i, i + 8).join(' ');
-
-    if (startPatterns.some(p => p.test(windowText))) {
-      start = i + 1;
-      break;
-    }
-  }
-
-  if (start < 0) {
-    return {
-      text,
-      found: false,
-      reason: 'transaction_table_header_not_found',
-      startIndex: -1,
-      endIndex: -1,
-    };
-  }
-
-  let end = lines.length;
-
-  for (let i = start; i < lines.length; i++) {
-    const line = lines[i];
-
-    if (endPatterns.some(p => p.test(line))) {
-      end = i;
-      break;
-    }
-  }
-
-  return {
-    text: lines.slice(start, end).join('\n'),
-    found: true,
-    reason: null,
-    startIndex: start,
-    endIndex: end,
-  };
-}
-
-function makeParseReport({ filename, parser, rows, cleaned, candidates, warning = null }) {
-  const fullCandidate = countCandidateRows(cleaned);
-  const tableRegion = extractTransactionTableRegion(cleaned);
-  const tableCandidate = countCandidateRows(tableRegion.text);
-
-  let candidate = tableCandidate;
-  let qualityScope = tableRegion.found ? 'transaction_table_region' : 'full_text_fallback';
-  let qualityNote = tableRegion.found
-    ? 'Candidate rows counted only within detected transaction-table region.'
-    : 'Transaction-table region was not confidently detected, so full text was used.';
-
-  if (tableRegion.found && tableCandidate.count < Math.max(1, rows.length * 0.5)) {
-    candidate = fullCandidate;
-    qualityScope = 'full_text_fallback';
-    qualityNote = 'Detected table region undercounted rows due to PDF extraction order, so full text candidate count was used.';
-  }
-
+function makeParseReport({ filename, parser, rows, cleaned, candidates, accountRecordCount = null, warning = null }) {
   const extracted = rows.length;
-  const rejected = Math.max(0, candidate.count - extracted);
+
+  let candidateCount;
+  let qualityScope;
+  let qualityNote;
+
+  if (parser === 'account_table' && accountRecordCount != null) {
+    candidateCount = accountRecordCount;
+    qualityScope = 'account_table_records';
+    qualityNote = 'Candidate rows are account-table records detected from Posting Date rows. Balance is validation only.';
+  } else if (parser === 'two_date_card' || parser === 'tagged_single_date') {
+    candidateCount = extracted;
+    qualityScope = 'parser_confirmed_transaction_rows';
+    qualityNote = 'Candidate rows are parser-confirmed card transaction rows, excluding statement summaries, balances, headers and footers.';
+  } else {
+    const loose = countCandidateRowsLoose(cleaned);
+    candidateCount = Math.max(extracted, loose.count);
+    qualityScope = 'loose_full_text_fallback';
+    qualityNote = 'Candidate rows estimated from loose date/amount patterns. Review recommended if this is low.';
+  }
+
+  const confidence = extracted > 0
+    ? Math.min(0.99, extracted / Math.max(1, candidateCount))
+    : 0;
 
   const validationSummary = {
     balance_passed: rows.filter(r => r.validation && String(r.validation.balance_check || '').startsWith('passed')).length,
@@ -1132,22 +916,6 @@ function makeParseReport({ filename, parser, rows, cleaned, candidates, warning 
     balance_not_checked: rows.filter(r => r.validation && ['pending', 'not_checked', 'edge_row', 'missing_balance'].includes(r.validation.balance_check)).length,
     balance_used_as_amount: rows.filter(r => r.validation && r.validation.balance_used_as_amount === true).length,
   };
-
-  let confidence = 0;
-
-  if (extracted > 0) {
-    confidence = candidate.count > 0
-      ? Math.min(0.99, extracted / Math.max(extracted, candidate.count))
-      : 0.85;
-
-    if (/generic|signed|csv/i.test(parser || '')) {
-      confidence = Math.max(0.62, confidence - 0.08);
-    }
-
-    if (validationSummary.balance_failed > 0) {
-      confidence = Math.max(0.55, confidence - 0.15);
-    }
-  }
 
   const status = extracted === 0
     ? 'failed'
@@ -1162,15 +930,11 @@ function makeParseReport({ filename, parser, rows, cleaned, candidates, warning 
   if (extracted === 0) {
     warnings.push('No transaction rows were extracted. This format may need OCR or another parser.');
   } else if (status !== 'ok') {
-    warnings.push(`Extracted ${extracted} transaction rows against ${candidate.count} estimated transaction-table candidate rows. Review recommended.`);
+    warnings.push(`Extracted ${extracted} transaction rows against ${candidateCount} parser-estimated transaction rows. Review recommended.`);
   }
 
   if (validationSummary.balance_failed > 0) {
     warnings.push(`${validationSummary.balance_failed} account-statement row(s) failed running-balance validation.`);
-  }
-
-  if (qualityScope === 'full_text_fallback') {
-    warnings.push(qualityNote);
   }
 
   return {
@@ -1178,70 +942,73 @@ function makeParseReport({ filename, parser, rows, cleaned, candidates, warning 
     parser: parser || null,
     status,
     confidence: Math.round(confidence * 100) / 100,
-    candidate_date_rows: candidate.count,
+    candidate_date_rows: candidateCount,
     transactions_extracted: extracted,
-    rejected_rows_estimate: rejected,
+    rejected_rows_estimate: Math.max(0, candidateCount - extracted),
     quality_scope: qualityScope,
     quality_note: qualityNote,
-    table_region_detected: tableRegion.found,
+    table_region_detected: true,
     validation_summary: validationSummary,
     parser_scores: (candidates || []).map(c => ({
       parser: c.name,
       rows: c.rows.length,
-      score: Math.round(scoreParse(c.rows, cleaned) * 1000) / 1000,
+      score: c.rows.length,
     })),
-    sample_candidate_rows: candidate.samples,
+    sample_candidate_rows: [],
     warnings,
   };
 }
 
-async function deterministicExtract(text, filename = null, apiKey = null) {
+async function deterministicExtract(text, filename = null) {
   const cleaned = cleanStatementText(text);
   const isBankAccount = looksLikeBankAccountStatement(cleaned);
   const isCreditCard = looksLikeCreditCardStatement(cleaned);
 
-  let accountRows = [];
+  let accountResult = {
+    rows: [],
+    records: [],
+  };
 
   if (isBankAccount) {
-    const records = extractAccountRecords(cleaned);
-
-    if (apiKey) {
-      accountRows = await parseAccountTableWithAI(records, apiKey);
-    }
-
-    if (accountRows.length === 0) {
-      accountRows = parseAccountTableDeterministic(cleaned);
-    }
+    accountResult = parseAccountTableDeterministic(cleaned);
   }
 
-  const cardRows = parseTwoDateCard(cleaned);
+  const taggedRows = parseTaggedSingleDate(cleaned);
+  const twoDateRows = parseTwoDateCard(cleaned);
 
   const candidates = [
     { name: 'csv_like', rows: parseCsvLike(cleaned) },
-    { name: 'tagged_single_date', rows: parseTaggedSingleDate(cleaned) },
-    { name: 'two_date_card', rows: cardRows },
-    { name: 'account_table', rows: accountRows },
+    { name: 'tagged_single_date', rows: taggedRows },
+    { name: 'two_date_card', rows: twoDateRows },
+    { name: 'account_table', rows: accountResult.rows },
     { name: 'signed_amount', rows: parseSignedAmountRows(cleaned) },
     { name: 'payslip', rows: parsePayslip(cleaned) },
   ];
 
   let best = null;
+  let warning = null;
 
-  if (isBankAccount && accountRows.length > 0) {
-    best = { name: 'account_table', rows: accountRows };
-  } else if (isCreditCard && cardRows.length > 0) {
-    best = { name: 'two_date_card', rows: cardRows };
-  }
+  if (isBankAccount) {
+    best = {
+      name: 'account_table',
+      rows: accountResult.rows,
+    };
 
-  if (!best) {
-    candidates.sort((a, b) => {
-      const bs = scoreParse(b.rows, cleaned);
-      const as = scoreParse(a.rows, cleaned);
-
-      if (bs !== as) return bs - as;
-      return b.rows.length - a.rows.length;
-    });
-
+    if (accountResult.records.length && accountResult.rows.length < accountResult.records.length) {
+      warning = `Bank account table detected ${accountResult.records.length} candidate rows but extracted ${accountResult.rows.length}.`;
+    }
+  } else if (isCreditCard && twoDateRows.length > 0) {
+    best = {
+      name: 'two_date_card',
+      rows: twoDateRows,
+    };
+  } else if (taggedRows.length > 0) {
+    best = {
+      name: 'tagged_single_date',
+      rows: taggedRows,
+    };
+  } else {
+    candidates.sort((a, b) => b.rows.length - a.rows.length);
     best = candidates[0];
   }
 
@@ -1254,9 +1021,8 @@ async function deterministicExtract(text, filename = null, apiKey = null) {
     rows,
     cleaned,
     candidates,
-    warning: isBankAccount && accountRows.length === 0
-      ? 'Bank account statement detected but no rows extracted. AI parser unavailable or returned no results.'
-      : null,
+    accountRecordCount: isBankAccount ? accountResult.records.length : null,
+    warning,
   });
 
   return {
@@ -1363,7 +1129,7 @@ function parseJsonObject(raw) {
   }
 }
 
-async function handleExtract(req, res, apiKey) {
+async function handleExtract(req, res) {
   const { text, filename } = req.body || {};
 
   if (!text || typeof text !== 'string') {
@@ -1390,7 +1156,7 @@ async function handleExtract(req, res, apiKey) {
     wasTruncated = true;
   }
 
-  const { parser, rows, cleaned, parse_report } = await deterministicExtract(input, filename, apiKey);
+  const { parser, rows, cleaned, parse_report } = await deterministicExtract(input, filename);
   const summary = summarizeTransactions(rows);
 
   const response = {
@@ -1481,7 +1247,7 @@ export default async function handler(req, res) {
     const action = req.body?.action;
 
     if (action === 'extract') {
-      return await handleExtract(req, res, apiKey);
+      return await handleExtract(req, res);
     }
 
     if (action === 'insight') {
