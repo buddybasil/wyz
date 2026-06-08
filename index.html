@@ -137,7 +137,7 @@ th{position:sticky;top:0;background:#fbfaf7;z-index:1;color:#5f5952}
 <body>
 <header class="top">
   <div class="brand"><div class="logo">▰</div>Wyz</div>
-  <div class="pill">v10 · Chunked upload · AI account parser</div>
+  <div class="pill">v12 · Account parser v16 · Balance safe</div>
 </header>
 
 <main class="wrap">
@@ -172,7 +172,7 @@ th{position:sticky;top:0;background:#fbfaf7;z-index:1;color:#5f5952}
       <h2>Processing status</h2>
       <div class="status">
         <div id="s1" class="step"><div class="dot"></div>Reading PDF text and stripping timestamp noise</div>
-        <div id="s2" class="step"><div class="dot"></div>Sending to parser / AI account parser</div>
+        <div id="s2" class="step"><div class="dot"></div>Sending to parser</div>
         <div id="s3" class="step"><div class="dot"></div>Running duplicate / pair checks</div>
         <div id="s4" class="step"><div class="dot"></div>Building dashboard</div>
       </div>
@@ -288,7 +288,7 @@ th{position:sticky;top:0;background:#fbfaf7;z-index:1;color:#5f5952}
 
 <script>
 const API_URL = '/api/analyze';
-const STORAGE_KEY = 'wyz.saved.generic.v10';
+const STORAGE_KEY = 'wyz.saved.generic.v12';
 const MAX_CHARS_PER_REQUEST = 520000;
 
 const state = {
@@ -392,7 +392,6 @@ async function extractPdfText(file) {
       let str = (item.str || '').trim();
       if (!str) continue;
 
-      // Timestamp tokens in account statements can bleed into amount fields.
       if (/^\d{1,2}:\d{2}(?::\d{2})?$/.test(str)) continue;
 
       str = cleanExtractedLine(str);
@@ -1121,7 +1120,7 @@ function renderQuality() {
     const version = x.backend_version ? `<br><span class="mini">${escapeHtml(x.backend_version)}</span>` : '';
 
     const val = r.validation_summary
-      ? `<br><span class="mini">Balance check: passed ${r.validation_summary.balance_passed || 0}, AI parsed ${r.validation_summary.balance_ai_parsed || 0}, failed ${r.validation_summary.balance_failed || 0}, not checked ${r.validation_summary.balance_not_checked || 0}</span>`
+      ? `<br><span class="mini">Balance check: passed ${r.validation_summary.balance_passed || 0}, failed ${r.validation_summary.balance_failed || 0}, not checked ${r.validation_summary.balance_not_checked || 0}</span>`
       : '';
 
     return `
