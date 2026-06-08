@@ -8,7 +8,7 @@ import traceback
 import pdfplumber
 
 
-VERSION = "pdfplumber-extract-v19b-no-cgi"
+VERSION = "pdfplumber-extract-v19c-table-plus-text-fallback"
 
 
 def cors_headers(handler):
@@ -37,6 +37,24 @@ def amountish(value):
         return ""
     value = re.sub(r"[^\d.,\-()]", "", value)
     return value.strip()
+
+
+def parse_amount(value):
+    value = amountish(value)
+    if not value:
+        return 0.0
+
+    value = value.replace(",", "")
+    value = value.replace("(", "").replace(")", "")
+
+    try:
+        return abs(float(value))
+    except Exception:
+        return 0.0
+
+
+def is_zero_amount(value):
+    return abs(parse_amount(value)) < 0.005
 
 
 def is_date(value):
@@ -169,7 +187,7 @@ def parse_account_table(table, page_no):
                 output.append(current)
 
             current = {
-                "source": "pdfplumber",
+                "source": "pdfplumber_table",
                 "page": page_no,
                 "postingDate": posting,
                 "valueDate": value_date,
@@ -202,6 +220,321 @@ def parse_account_table(table, page_no):
         and r.get("description")
         and (r.get("debit") or r.get("credit"))
     ]
+
+
+def strip_time_tokens(s):
+    return re.sub(r"\b\d{1,2}:\d{2}(?::\d{2})?\b", " ", str(s or ""))
+
+
+def date_pattern():
+    return r"(?:\d{1,2}[/-]\d{1,2}[/-]\d{4}|\d{4}[/-]\d{1,2}[/-]\d{1,2})"
+
+
+def record_start_re():
+    return re.compile(r"^" + date_pattern() + r"(?:\s+" + date_pattern() + r")?\b")
+
+
+def clean_line_for_record(line):
+    line = strip_time_tokens(line)
+    line = clean_cell(line)
+    return line
+
+
+def is_noise_text_line(line):
+    u = line.upper()
+
+    return (
+        not line
+        or "POSTING DATE" in u
+        or "VALUE DATE" in u
+        or "DEBIT AMOUNT" in u
+        or "CREDIT AMOUNT" in u
+        or "OPENING BALANCE" in u
+        or "CLOSING BALANCE" in u
+        or "ACCOUNT STATEMENT" in u
+        or "ACCOUNT NUMBER" in u
+        or "LICENSED BY THE CENTRAL BANK" in u
+        or "END OF STATEMENT" in u
+    )
+
+
+def extract_text_records(text):
+    lines = [
+        clean_line_for_record(x)
+        for x in str(text or "").splitlines()
+    ]
+
+    records = []
+    current = []
+
+    start_re = record_start_re()
+
+    def flush():
+        nonlocal current
+        if current:
+            rec = clean_cell(" ".join(current))
+            if rec:
+                records.append(rec)
+            current = []
+
+    for line in lines:
+        if is_noise_text_line(line):
+            continue
+
+        if start_re.match(line):
+            flush()
+            current.append(line)
+        elif current:
+            current.append(line)
+
+    flush()
+    return records
+
+
+def amount_tokens_with_positions(s):
+    token_re = re.compile(r"(?<![\w])(\(?-?\d{1,3}(?:,\d{3})*(?:\.\d+)?\)?|\(?-?\d+(?:\.\d+)?\)?)(?![\w])")
+    out = []
+
+    for m in token_re.finditer(s):
+        raw = m.group(1)
+        val = parse_amount(raw)
+
+        if val < 0:
+            continue
+
+        out.append({
+            "raw": raw,
+            "value": val,
+            "start": m.start(1),
+            "end": m.end(1),
+        })
+
+    return out
+
+
+def token_is_reference_noise(tok):
+    raw = str(tok.get("raw", ""))
+    digits = re.sub(r"\D", "", raw)
+
+    if not digits:
+        return False
+
+    # Long integer IDs and tiny trailing split references are usually not money columns.
+    if "." not in raw and "," not in raw:
+        if len(digits) >= 7:
+            return True
+        if len(digits) <= 4 and tok.get("value", 0) > 0:
+            return True
+
+    return False
+
+
+def classify_row_hint(text):
+    u = text.upper()
+
+    if (
+        "SALARY" in u
+        or "B/O" in u
+        or "CHEQUE DEPOSIT" in u
+        or "DIVIDEND" in u
+        or "APOLLO FLIGHT" in u
+        or "UNION HOLDING" in u
+    ):
+        return "CR"
+
+    if (
+        u.startswith("PUR ")
+        or u.startswith("ATM WDL")
+        or u.startswith("FOREIGN TRANSACTION")
+        or u.startswith("SEND MONEY")
+        or u.startswith("I/W CLEARING")
+        or "CREDIT CARD PAYMNT" in u
+        or "CREDIT CARD PAYMENT" in u
+        or "MBTRF" in u
+        or "TRF OUT" in u
+        or "INSTALLMENT RECOVERY" in u
+        or "INSTALMENT RECOVERY" in u
+    ):
+        return "DR"
+
+    return "UNKNOWN"
+
+
+def score_amount_triple(rest, tokens, i):
+    a = tokens[i]
+    b = tokens[i + 1]
+    c = tokens[i + 2]
+
+    a_zero = is_zero_amount(a["raw"])
+    b_zero = is_zero_amount(b["raw"])
+
+    if a_zero == b_zero:
+        return None
+
+    if c["value"] <= 0:
+        return None
+
+    debit = a["raw"] if not a_zero else "0.00"
+    credit = b["raw"] if not b_zero else "0.00"
+    balance = c["raw"]
+    direction = "DR" if not a_zero else "CR"
+
+    hint = classify_row_hint(rest)
+
+    score = 0
+
+    # Prefer triples closer to the end, but allow one tiny trailing split-reference.
+    trailing = tokens[i + 3:]
+    trailing_noise = all(token_is_reference_noise(t) for t in trailing)
+
+    if not trailing:
+        score += 20
+    elif len(trailing) <= 2 and trailing_noise:
+        score += 15
+    else:
+        score -= 20 + len(trailing) * 5
+
+    if hint == direction:
+        score += 20
+    elif hint != "UNKNOWN":
+        score -= 25
+
+    # Prefer balances with decimals, but do not require them.
+    if "." in balance or "," in balance:
+        score += 4
+
+    # Avoid treating a tiny reference as a balance.
+    if token_is_reference_noise(c) and c["value"] < 1000:
+        score -= 15
+
+    # Avoid amount fields that look like long references.
+    if token_is_reference_noise(a) and not a_zero:
+        score -= 20
+    if token_is_reference_noise(b) and not b_zero:
+        score -= 20
+
+    return {
+        "score": score,
+        "debit": debit,
+        "credit": credit,
+        "balance": balance,
+        "direction": direction,
+        "amount_start": a["start"] if direction == "DR" else b["start"],
+        "triple_start": a["start"],
+        "triple_end": c["end"],
+    }
+
+
+def choose_best_amount_triple(rest):
+    tokens = amount_tokens_with_positions(rest)
+
+    if len(tokens) < 3:
+        return None
+
+    candidates = []
+
+    for i in range(0, len(tokens) - 2):
+        candidate = score_amount_triple(rest, tokens, i)
+        if candidate is not None:
+            candidates.append(candidate)
+
+    if not candidates:
+        return None
+
+    candidates.sort(key=lambda x: x["score"], reverse=True)
+
+    best = candidates[0]
+
+    if best["score"] < -5:
+        return None
+
+    return best
+
+
+def parse_text_record_to_row(record, page_no):
+    rec = clean_cell(strip_time_tokens(record))
+
+    date_re = re.compile(date_pattern())
+    dates = list(date_re.finditer(rec))
+
+    if not dates:
+        return None
+
+    posting = dates[0].group(0)
+    value_date = ""
+
+    rest_start = dates[0].end()
+
+    if len(dates) > 1 and dates[1].start() <= rest_start + 3:
+        value_date = dates[1].group(0)
+        rest_start = dates[1].end()
+
+    rest = clean_cell(rec[rest_start:])
+
+    if not rest:
+        return None
+
+    triple = choose_best_amount_triple(rest)
+
+    if not triple:
+        return None
+
+    left = clean_cell(rest[:triple["amount_start"]])
+
+    # Split description/reference approximately. This is display-only; amount logic is already recovered.
+    description = left
+    reference = ""
+
+    m = re.match(r"^(SALARY)\s+(.+)$", left, re.I)
+    if m:
+        description = clean_cell(m.group(1))
+        reference = clean_cell(m.group(2))
+    else:
+        m = re.match(r"^(.*?)(\bPHUB[A-Z0-9 ]+)$", left, re.I)
+        if m:
+            description = clean_cell(m.group(1))
+            reference = clean_cell(m.group(2))
+
+    if not description:
+        description = left or "Unknown"
+
+    return {
+        "source": "pdfplumber_text_fallback",
+        "page": page_no,
+        "postingDate": posting,
+        "valueDate": value_date,
+        "description": description,
+        "reference": reference,
+        "debit": amountish(triple["debit"]),
+        "credit": amountish(triple["credit"]),
+        "balance": amountish(triple["balance"]),
+        "raw": rec,
+    }
+
+
+def extract_text_fallback_rows(pdf):
+    rows = []
+    diagnostics = []
+
+    for page_no, page in enumerate(pdf.pages, start=1):
+        try:
+            text = page.extract_text(x_tolerance=2, y_tolerance=3) or ""
+        except Exception as exc:
+            diagnostics.append({
+                "page": page_no,
+                "strategy": "text_fallback",
+                "error": str(exc),
+            })
+            continue
+
+        records = extract_text_records(text)
+
+        for rec in records:
+            row = parse_text_record_to_row(rec, page_no)
+            if row:
+                rows.append(row)
+
+    return rows, diagnostics
 
 
 def extract_pdf_tables(pdf_bytes):
@@ -256,6 +589,11 @@ def extract_pdf_tables(pdf_bytes):
                     best_rows = page_rows
 
             all_rows.extend(best_rows)
+
+        if not all_rows:
+            fallback_rows, fallback_diag = extract_text_fallback_rows(pdf)
+            diagnostics.extend(fallback_diag)
+            all_rows = fallback_rows
 
     return all_rows, diagnostics
 
