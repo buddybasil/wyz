@@ -282,17 +282,17 @@ class handler(BaseHTTPRequestHandler):
             )
 
             file_item = form["file"] if "file" in form else None
-
-            if not file_item or not getattr(file_item, "file", None):
-                self.send_response(400)
-                cors_headers(self)
-                self.send_header("Content-Type", "application/json")
-                self.end_headers()
-                self.wfile.write(json.dumps({
-                    "error": "missing_file",
-                    "message": "No PDF file uploaded."
-                }).encode("utf-8"))
-                return
+           
+    if file_item is None or getattr(file_item, "file", None) is None:
+    self.send_response(400)
+    cors_headers(self)
+    self.send_header("Content-Type", "application/json")
+    self.end_headers()
+    self.wfile.write(json.dumps({
+        "error": "missing_file",
+        "message": "No PDF file uploaded."
+    }).encode("utf-8"))
+    return
 
             pdf_bytes = file_item.file.read()
             rows, diagnostics = extract_pdf_tables(pdf_bytes)
