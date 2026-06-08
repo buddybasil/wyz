@@ -655,6 +655,50 @@ async function handleExtract(req, res) {
     });
   }
 
+    const looksLikeAccountStatement =
+    /ACCOUNT\s+STATEMENT/i.test(`${filename || ''} ${text || ''}`) ||
+    (
+      /POSTING\s+DATE/i.test(text || '') &&
+      /VALUE\s+DATE/i.test(text || '') &&
+      /DEBIT\s+AMOUNT/i.test(text || '') &&
+      /CREDIT\s+AMOUNT/i.test(text || '') &&
+      /BALANCE/i.test(text || '')
+    );
+
+  if (looksLikeAccountStatement) {
+    const rows = [];
+
+    const parse_report = makeParseReport({
+      filename,
+      parser: 'account_statement_requires_table_rows',
+      rows,
+      candidateCount: 0,
+      qualityScope: 'safe_account_statement_guard',
+      qualityNote: 'Account statement detected but no pdfplumber tableRows were provided. Fallback card_text parser was blocked to prevent balance values being counted as transaction amounts.',
+    });
+
+    parse_report.status = 'failed';
+    parse_report.warnings = [
+      'Account statement detected, but pdfplumber returned no table rows. This file was not parsed to avoid false income/expense totals.'
+    ];
+
+    return res.status(200).json({
+      backend_version: BACKEND_VERSION,
+      transactions: [],
+      count: 0,
+      filename: filename || null,
+      parser: 'account_statement_requires_table_rows',
+      deterministic: false,
+      text_chars: text.length,
+      lines_detected: 0,
+      total_seq: 0,
+      skipped_lines: [],
+      summary: summarizeTransactions([]),
+      parse_report,
+      warning: parse_report.warnings[0],
+    });
+  }
+
   const csvRows = parseCsvLike(text);
   const cardRows = parseCardText(text);
 
