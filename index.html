@@ -137,7 +137,7 @@ th{position:sticky;top:0;background:#fbfaf7;z-index:1;color:#5f5952}
 <body>
 <header class="top">
   <div class="brand"><div class="logo">▰</div>Wyz</div>
-  <div class="pill">v12 · Account parser v16 · Balance safe</div>
+  <div class="pill">v13 · Structured account table · v17 backend</div>
 </header>
 
 <main class="wrap">
@@ -288,7 +288,7 @@ th{position:sticky;top:0;background:#fbfaf7;z-index:1;color:#5f5952}
 
 <script>
 const API_URL = '/api/analyze';
-const STORAGE_KEY = 'wyz.saved.generic.v12';
+const STORAGE_KEY = 'wyz.saved.generic.v13';
 const MAX_CHARS_PER_REQUEST = 520000;
 
 const state = {
@@ -382,26 +382,40 @@ async function extractPdfText(file) {
   }).promise;
 
   let text = '';
+  const structuredAccountRows = [];
 
   for (let p = 1; p <= pdf.numPages; p++) {
     const page = await pdf.getPage(p);
+    const viewport = page.getViewport({ scale: 1 });
     const content = await page.getTextContent();
+
+    const items = content.items
+      .map(item => {
+        let str = (item.str || '').trim();
+        if (!str) return null;
+
+        if (/^\d{1,2}:\d{2}(?::\d{2})?$/.test(str)) return null;
+
+        str = cleanExtractedLine(str);
+        if (!str) return null;
+
+        return {
+          str,
+          x: item.transform[4],
+          y: item.transform[5],
+          w: item.width || 0,
+          page: p,
+          pageWidth: viewport.width
+        };
+      })
+      .filter(Boolean);
+
     const rows = {};
 
-    for (const item of content.items) {
-      let str = (item.str || '').trim();
-      if (!str) continue;
-
-      if (/^\d{1,2}:\d{2}(?::\d{2})?$/.test(str)) continue;
-
-      str = cleanExtractedLine(str);
-      if (!str) continue;
-
-      const y = Math.round(item.transform[5]);
-      const x = item.transform[4];
-
+    for (const item of items) {
+      const y = Math.round(item.y);
       if (!rows[y]) rows[y] = [];
-      rows[y].push({ x, str });
+      rows[y].push(item);
     }
 
     const pageLines = Object.keys(rows)
@@ -414,16 +428,206 @@ async function extractPdfText(file) {
       .join('\n');
 
     text += pageLines + '\n';
+
+    structuredAccountRows.push(...extractStructuredAccountRowsFromPage(items));
   }
 
-  return text.trim();
+  return {
+    text: text.trim(),
+    tableRows: structuredAccountRows
+  };
+}
+
+function looksLikePostingDate(s) {
+  return /^\d{1,2}[\/\-]\d{1,2}[\/\-]\d{4}$/.test(String(s || '').trim()) ||
+    /^\d{4}[\/\-]\d{1,2}[\/\-]\d{1,2}$/.test(String(s || '').trim());
+}
+
+function amountishCell(s) {
+  const raw = String(s || '').trim();
+  if (!raw) return '';
+
+  const cleaned = raw
+    .replace(/[^\d.,\-()]/g, '')
+    .replace(/\s+/g, '');
+
+  return cleaned;
+}
+
+function extractStructuredAccountRowsFromPage(items) {
+  if (!items || !items.length) return [];
+
+  const byY = {};
+
+  for (const item of items) {
+    const y = Math.round(item.y);
+    if (!byY[y]) byY[y] = [];
+    byY[y].push(item);
+  }
+
+  const lines = Object.keys(byY)
+    .map(Number)
+    .sort((a, b) => b - a)
+    .map(y => ({
+      y,
+      items: byY[y].sort((a, b) => a.x - b.x),
+      text: byY[y].sort((a, b) => a.x - b.x).map(i => i.str).join(' ')
+    }));
+
+  let headerLine = null;
+
+  for (const line of lines) {
+    const t = line.text.toUpperCase();
+
+    if (
+      t.includes('POSTING DATE') &&
+      t.includes('VALUE DATE') &&
+      t.includes('DESCRIPTION') &&
+      t.includes('DEBIT AMOUNT') &&
+      t.includes('CREDIT AMOUNT') &&
+      t.includes('BALANCE')
+    ) {
+      headerLine = line;
+      break;
+    }
+  }
+
+  if (!headerLine) return [];
+
+  function findHeaderX(patterns, fallback) {
+    for (const pat of patterns) {
+      const found = headerLine.items.find(i => pat.test(i.str.toUpperCase()));
+      if (found) return found.x;
+    }
+    return fallback;
+  }
+
+  const pageWidth = items[0].pageWidth || 595;
+
+  const xPosting = findHeaderX([/POSTING/], pageWidth * 0.03);
+  const xValue = findHeaderX([/VALUE/], pageWidth * 0.14);
+  const xDesc = findHeaderX([/DESCRIPTION/], pageWidth * 0.25);
+  const xRef = findHeaderX([/REF/, /CHEQUE/], pageWidth * 0.54);
+  const xDebit = findHeaderX([/DEBIT/], pageWidth * 0.67);
+  const xCredit = findHeaderX([/CREDIT/], pageWidth * 0.78);
+  const xBalance = findHeaderX([/BALANCE/], pageWidth * 0.90);
+
+  const anchors = [
+    { key: 'postingDate', x: xPosting },
+    { key: 'valueDate', x: xValue },
+    { key: 'description', x: xDesc },
+    { key: 'reference', x: xRef },
+    { key: 'debit', x: xDebit },
+    { key: 'credit', x: xCredit },
+    { key: 'balance', x: xBalance }
+  ].sort((a, b) => a.x - b.x);
+
+  const boundaries = [];
+
+  for (let i = 0; i < anchors.length - 1; i++) {
+    boundaries.push((anchors[i].x + anchors[i + 1].x) / 2);
+  }
+
+  function columnForX(x) {
+    for (let i = 0; i < boundaries.length; i++) {
+      if (x < boundaries[i]) return anchors[i].key;
+    }
+    return anchors[anchors.length - 1].key;
+  }
+
+  const output = [];
+  let current = null;
+
+  const dataLines = lines.filter(line => line.y < headerLine.y - 3);
+
+  for (const line of dataLines) {
+    const t = line.text.toUpperCase();
+
+    if (
+      !line.text ||
+      t.includes('OPENING BALANCE') ||
+      t.includes('CLOSING BALANCE') ||
+      t.includes('TOTAL') ||
+      t.includes('AVAILABLE BALANCE') ||
+      t.includes('END OF STATEMENT') ||
+      t.includes('GENERAL TERMS') ||
+      t.includes('LICENSED BY THE CENTRAL BANK')
+    ) {
+      continue;
+    }
+
+    const cells = {
+      postingDate: [],
+      valueDate: [],
+      description: [],
+      reference: [],
+      debit: [],
+      credit: [],
+      balance: []
+    };
+
+    for (const item of line.items) {
+      const col = columnForX(item.x);
+      cells[col].push(item.str);
+    }
+
+    const rowLine = {
+      postingDate: cleanExtractedLine(cells.postingDate.join(' ')),
+      valueDate: cleanExtractedLine(cells.valueDate.join(' ')),
+      description: cleanExtractedLine(cells.description.join(' ')),
+      reference: cleanExtractedLine(cells.reference.join(' ')),
+      debit: amountishCell(cells.debit.join(' ')),
+      credit: amountishCell(cells.credit.join(' ')),
+      balance: amountishCell(cells.balance.join(' ')),
+      raw: cleanExtractedLine(line.text)
+    };
+
+    const startsNewRow = looksLikePostingDate(rowLine.postingDate);
+
+    if (startsNewRow) {
+      if (current) output.push(current);
+
+      current = {
+        postingDate: rowLine.postingDate,
+        valueDate: rowLine.valueDate,
+        description: rowLine.description,
+        reference: rowLine.reference,
+        debit: rowLine.debit,
+        credit: rowLine.credit,
+        balance: rowLine.balance,
+        raw: rowLine.raw
+      };
+    } else if (current) {
+      if (rowLine.description) current.description = cleanExtractedLine(`${current.description} ${rowLine.description}`);
+      if (rowLine.reference) current.reference = cleanExtractedLine(`${current.reference} ${rowLine.reference}`);
+      if (rowLine.debit && !current.debit) current.debit = rowLine.debit;
+      if (rowLine.credit && !current.credit) current.credit = rowLine.credit;
+      if (rowLine.balance && !current.balance) current.balance = rowLine.balance;
+      current.raw = cleanExtractedLine(`${current.raw} ${rowLine.raw}`);
+    }
+  }
+
+  if (current) output.push(current);
+
+  return output.filter(r =>
+    looksLikePostingDate(r.postingDate) &&
+    r.description &&
+    (Number(String(r.debit || '').replace(/,/g, '')) > 0 ||
+     Number(String(r.credit || '').replace(/,/g, '')) > 0)
+  );
 }
 
 async function extractText(file) {
   const name = file.name.toLowerCase();
 
   if (name.endsWith('.pdf')) return extractPdfText(file);
-  if (name.endsWith('.csv') || name.endsWith('.txt')) return file.text();
+
+  if (name.endsWith('.csv') || name.endsWith('.txt')) {
+    return {
+      text: await file.text(),
+      tableRows: []
+    };
+  }
 
   throw new Error('Unsupported file. Please upload PDF, CSV, or TXT.');
 }
@@ -471,7 +675,31 @@ async function postJson(payload) {
   return data;
 }
 
-async function parseFileThroughBackend(file, text) {
+async function parseFileThroughBackend(file, text, tableRows = []) {
+  if (Array.isArray(tableRows) && tableRows.length) {
+    setMsg(`Parsing <b>${escapeHtml(file.name)}</b> using structured table rows...`);
+
+    const data = await postJson({
+      action: 'extract',
+      filename: file.name,
+      text,
+      tableRows
+    });
+
+    return {
+      transactions: (data.transactions || []).map(t => ({
+        ...t,
+        _chunk: null,
+        _chunkCount: 1
+      })),
+      count: data.count || 0,
+      parser: data.parser,
+      warning: data.warning || null,
+      backend_version: data.backend_version || null,
+      parse_report: data.parse_report || null
+    };
+  }
+
   const chunks = splitTextIntoSafeChunks(text);
   const allTransactions = [];
   const reports = [];
@@ -600,10 +828,12 @@ el('analyzeBtn').onclick = async () => {
       setStep(1);
       setMsg(`Reading <b>${escapeHtml(file.name)}</b>...`);
 
-      const text = await extractText(file);
+      const extracted = await extractText(file);
+      const text = extracted.text || '';
+      const tableRows = extracted.tableRows || [];
 
       setStep(2);
-      const data = await parseFileThroughBackend(file, text);
+      const data = await parseFileThroughBackend(file, text, tableRows);
 
       if (data.backend_version) {
         console.log('Wyz backend version:', data.backend_version);
