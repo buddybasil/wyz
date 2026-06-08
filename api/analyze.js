@@ -1,16 +1,16 @@
 // WYZ API - Generic Statement Analyzer
-// v15-deterministic-account-first
+// v16-zero-marker-balance-safe
 //
 // Core fixes:
 // - Account statements are parsed deterministically first.
 // - Account statement amount is taken ONLY from Debit Amount or Credit Amount.
 // - Balance is never used as transaction amount.
+// - Account parser uses the 0.00 marker, row kind, and balance validation.
 // - AI is no longer the primary parser for account statements.
-// - Parse quality for known transaction tables uses actual parser row logic, not loose date/amount noise.
 // - Credit card parser remains deterministic.
 // - User still decides savings, family/personal transfers, uncertain credits, etc.
 
-const BACKEND_VERSION = 'strict-account-table-v15-deterministic-account-first';
+const BACKEND_VERSION = 'strict-account-table-v16-zero-marker-balance-safe';
 
 const MODEL = 'claude-haiku-4-5-20251001';
 const INSIGHT_MAX_TOKENS = 450;
@@ -169,7 +169,7 @@ function looksLikeCreditCardStatement(text) {
 function isInternalTransferLike(t) {
   const m = String(`${t.merchant || ''} ${t.reference || ''}`).toUpperCase();
 
-  return (
+  if (
     /PAYMENT\s*RECEIVED/.test(m) ||
     /PAYMENTRECEIVED/.test(m) ||
     /CREDIT\s*CARD\s*PAYMNT/.test(m) ||
@@ -177,7 +177,32 @@ function isInternalTransferLike(t) {
     /CARD\s*PAYMENT/.test(m) ||
     /PAYMENT\s*TO\s*CARD/.test(m) ||
     /FTS\s*&\s*SWIFT/.test(m)
-  );
+  ) {
+    return true;
+  }
+
+  if (
+    /\bB\/O\s+BASIL\b/.test(m) ||
+    /\bBASIL\s+ABRAHAM\b/.test(m) ||
+    /\bB\/O\s+SEENA\b/.test(m) ||
+    /\bSEENA\s+BASIL\b/.test(m) ||
+    /\bOUT\s+TO\s+BASIL\b/.test(m) ||
+    /\bOUT\s+TO\s+SEENA\b/.test(m) ||
+    /\bTRF\s+OUT\s+TO\b/.test(m) ||
+    (/\bMBTRF\b/.test(m) && /\bTRF\b/.test(m)) ||
+    /\bSEND\s+MONEY\s+VIA\s+AANI\b/.test(m)
+  ) {
+    return true;
+  }
+
+  if (
+    /\bALLIANCE\s+INSURANCE\b/.test(m) ||
+    /\bB\/O\s+ALLIANCE\b/.test(m)
+  ) {
+    return true;
+  }
+
+  return false;
 }
 
 function categorizeTxn(t) {
@@ -514,6 +539,7 @@ function fixAccountAmountOcr(s) {
     .replace(/\bO\.OO\b/gi, '0.00')
     .replace(/\bO\.00\b/gi, '0.00')
     .replace(/\b0\.OO\b/gi, '0.00')
+    .replace(/\b(\d{1,6})[Oo]{2}\b/g, '$1.00')
     .replace(/\b\.([0-9]{1,2})(?=\s|$)/g, '0.$1');
 }
 
@@ -580,20 +606,107 @@ function extractAmountTokens(s) {
   return out;
 }
 
-function isReferenceAmountLike(raw, amount) {
-  const s = String(raw || '').replace(/[^\d]/g, '');
+function accountRowKind(text) {
+  const s = String(text || '').toUpperCase();
 
-  if (!s) return false;
+  if (
+    /\bSALARY\b/.test(s) ||
+    /\bCHEQUE\s+DEPOSIT\b/.test(s) ||
+    /\bB\/O\b/.test(s) ||
+    /\bADX\s+DIVIDEND\b/.test(s) ||
+    /\bDIVIDEND\b/.test(s) ||
+    /\bAPOLLO\s+FLIGHT\b/.test(s) ||
+    /\bUNION\s+HOLDING\b/.test(s)
+  ) {
+    return 'CR';
+  }
 
-  return s.length >= 7 && Number.isInteger(amount);
+  if (
+    /^PUR\b/.test(s) ||
+    /^ATM\s+WDL\b/.test(s) ||
+    /^FOREIGN\s+TRANSACTION/.test(s) ||
+    /^SEND\s+MONEY\s+VIA\s+AANI/.test(s) ||
+    /^I\/W\s+CLEARING\s+CHEQUE/.test(s) ||
+    /\bMBTRF\b/.test(s) ||
+    /\bTRF\s+OUT\b/.test(s) ||
+    /\bCREDIT\s+CARD\s+PAYMNT\b/.test(s) ||
+    /\bCREDIT\s+CARD\s+PAYMENT\b/.test(s) ||
+    /\bINSTALLMENT\s+RECOVERY\b/.test(s) ||
+    /\bINSTALMENT\s+RECOVERY\b/.test(s)
+  ) {
+    return 'DR';
+  }
+
+  return 'UNKNOWN';
 }
 
-function removeLastTokenFromText(text, token) {
-  const idx = String(text).lastIndexOf(token.raw);
+function isTinyReferenceTail(token) {
+  const raw = String(token?.raw || '').replace(/[^\d]/g, '');
 
-  if (idx < 0) return text;
+  return raw.length >= 3 && raw.length <= 5 && Number.isInteger(token.amount);
+}
 
-  return normalizeSpaces(String(text).slice(0, idx) + ' ' + String(text).slice(idx + token.raw.length));
+function isLongIntegerReference(token) {
+  const raw = String(token?.raw || '').replace(/[^\d]/g, '');
+
+  return raw.length >= 7 && Number.isInteger(token.amount);
+}
+
+function isReferenceToken(token) {
+  return isTinyReferenceTail(token) || isLongIntegerReference(token);
+}
+
+function validMoneyToken(token) {
+  if (!token) return false;
+  if (!Number.isFinite(Number(token.amount))) return false;
+  if (isReferenceToken(token)) return false;
+  return true;
+}
+
+function nearestMoneyBefore(tokens, zeroToken) {
+  const before = tokens
+    .filter(t => t.end <= zeroToken.start)
+    .filter(validMoneyToken);
+
+  return before.length ? before[before.length - 1] : null;
+}
+
+function moneyAfter(tokens, zeroToken) {
+  return tokens
+    .filter(t => t.start >= zeroToken.end)
+    .filter(validMoneyToken);
+}
+
+function findZeroMarker(tokens) {
+  return tokens.find(t => parseAmount(t.raw) === 0 && /0+\.0+/.test(String(t.raw)));
+}
+
+function amountCandidates(n) {
+  const v = Number(n) || 0;
+  const out = [v];
+
+  if (v >= 1000) out.push(v / 10);
+  if (v >= 1000) out.push(v / 100);
+  if (v >= 10000) out.push(v / 1000);
+
+  return [...new Set(out.map(x => Math.round(x * 100) / 100))]
+    .filter(x => x > 0);
+}
+
+function applyAmountToParsedRow(row, candidate) {
+  const amt = Math.round(Number(candidate) * 100) / 100;
+
+  row.amount = amt;
+
+  if (row.direction === 'DR') {
+    row.debit = amt;
+    row.credit = 0;
+  } else {
+    row.credit = amt;
+    row.debit = 0;
+  }
+
+  return row;
 }
 
 function splitAccountDescriptionAndReference(body) {
@@ -687,52 +800,62 @@ function parseAccountRecordDeterministic(rec0) {
     rest = rest.slice(secondDate[0].length).trim();
   }
 
-  // Account-table structure after dates:
-  // Description + Ref/Cheque + Debit + Credit + Balance
-  //
-  // We identify the last 3 monetary columns. The last is balance.
-  // The first two among the last 3 are Debit and Credit.
-  // Balance is validation context only and never used as transaction amount.
-  const allTokens = extractAmountTokens(rest)
-    .filter(t => t.amount >= 0)
-    .filter(t => !isReferenceAmountLike(t.raw, t.amount));
+  const tokens = extractAmountTokens(rest);
+  const zero = findZeroMarker(tokens);
 
-  if (allTokens.length < 3) return null;
+  if (!zero) return null;
 
-  const last3 = allTokens.slice(-3);
-  const debitToken = last3[0];
-  const creditToken = last3[1];
-  const balanceToken = last3[2];
-
-  const debit = parseAmount(debitToken.raw);
-  const credit = parseAmount(creditToken.raw);
-  const balance = parseAmount(balanceToken.raw);
+  const kind = accountRowKind(rest);
 
   let direction = null;
-  let amount = 0;
+  let amountToken = null;
+  let balanceToken = null;
 
-  if (debit > 0 && credit === 0) {
+  if (kind === 'DR') {
     direction = 'DR';
-    amount = debit;
-  } else if (credit > 0 && debit === 0) {
+
+    amountToken = nearestMoneyBefore(tokens, zero);
+
+    const after = moneyAfter(tokens, zero);
+    balanceToken = after[0] || null;
+  } else if (kind === 'CR') {
     direction = 'CR';
-    amount = credit;
-  } else if (debit > 0 && credit > 0) {
-    return null;
+
+    const after = moneyAfter(tokens, zero);
+    amountToken = after[0] || null;
+    balanceToken = after[1] || null;
   } else {
-    return null;
+    const before = nearestMoneyBefore(tokens, zero);
+    const after = moneyAfter(tokens, zero);
+
+    if (before && after.length) {
+      direction = 'DR';
+      amountToken = before;
+      balanceToken = after[0] || null;
+    } else if (!before && after.length >= 1) {
+      direction = 'CR';
+      amountToken = after[0] || null;
+      balanceToken = after[1] || null;
+    } else {
+      return null;
+    }
   }
 
+  if (!amountToken || !direction) return null;
+
+  let amount = parseAmount(amountToken.raw);
   if (!amount || amount <= 0) return null;
 
-  let body = rest.slice(0, debitToken.start).trim();
+  const balance = balanceToken ? parseAmount(balanceToken.raw) : null;
 
-  // Some extracted rows put ref after description before amount; keep it separated where possible.
+  let body = normalizeSpaces(rest.slice(0, amountToken.start));
+  body = normalizeSpaces(body.replace(/\b0+\.0+\b\s*$/g, ''));
+
   const split = splitAccountDescriptionAndReference(body);
 
   if (!split.description || split.description.length < 2) return null;
 
-  return {
+  const row = {
     date: postingDateIso,
     merchant: split.description,
     reference: split.reference,
@@ -740,14 +863,27 @@ function parseAccountRecordDeterministic(rec0) {
     direction,
     debit: direction === 'DR' ? Math.round(amount * 100) / 100 : 0,
     credit: direction === 'CR' ? Math.round(amount * 100) / 100 : 0,
-    balance: Math.round(balance * 100) / 100,
+    balance: balance != null ? Math.round(balance * 100) / 100 : null,
     raw: rec,
     validation: {
       balance_check: 'not_checked',
       balance_used_as_amount: false,
-      amount_source: direction === 'DR' ? 'debit_column' : 'credit_column',
+      amount_source: direction === 'DR' ? 'debit_zero_marker' : 'credit_zero_marker',
+      row_kind: kind,
+      amount_raw: amountToken.raw,
+      balance_raw: balanceToken ? balanceToken.raw : null,
     },
   };
+
+  if (
+    row.direction === 'CR' &&
+    /^(PUR|ATM\s+WDL|FOREIGN\s+TRANSACTION|INSTALLMENT|INSTALMENT)/i.test(row.merchant)
+  ) {
+    row.validation.balance_check = 'suspected_balance_leak';
+    row.validation.exclude_from_pl = true;
+  }
+
+  return row;
 }
 
 function validateRunningBalances(parsed) {
@@ -755,10 +891,31 @@ function validateRunningBalances(parsed) {
 
   const tolerance = 0.05;
 
+  function checkDiff(cur, nextOlder, amountOverride = null) {
+    const debit = cur.direction === 'DR'
+      ? Number(amountOverride ?? cur.debit ?? cur.amount ?? 0)
+      : 0;
+
+    const credit = cur.direction === 'CR'
+      ? Number(amountOverride ?? cur.credit ?? cur.amount ?? 0)
+      : 0;
+
+    const expectedOlderBalance =
+      Number(cur.balance) + debit - credit;
+
+    return Math.abs(expectedOlderBalance - Number(nextOlder.balance));
+  }
+
   for (let i = 0; i < parsed.length; i++) {
     const cur = parsed[i];
 
     if (!cur.validation) cur.validation = {};
+
+    if (cur.validation.balance_check === 'suspected_balance_leak') {
+      cur.validation.exclude_from_pl = true;
+      continue;
+    }
+
     cur.validation.balance_check = 'not_checked';
 
     if (cur.balance == null || !Number.isFinite(Number(cur.balance))) {
@@ -773,28 +930,60 @@ function validateRunningBalances(parsed) {
       continue;
     }
 
-    const expectedOlderBalance =
-      Number(cur.balance) + Number(cur.debit || 0) - Number(cur.credit || 0);
+    const baseDiff = checkDiff(cur, nextOlder);
 
-    const diff = Math.abs(expectedOlderBalance - Number(nextOlder.balance));
-
-    if (diff <= tolerance) {
+    if (baseDiff <= tolerance) {
       cur.validation.balance_check = 'passed_reverse_order';
-      cur.validation.balance_diff = Math.round(diff * 100) / 100;
+      cur.validation.balance_diff = Math.round(baseDiff * 100) / 100;
       continue;
     }
 
+    let best = {
+      amount: Number(cur.amount),
+      diff: baseDiff,
+    };
+
+    for (const candidate of amountCandidates(cur.amount)) {
+      const d = checkDiff(cur, nextOlder, candidate);
+
+      if (d < best.diff) {
+        best = {
+          amount: candidate,
+          diff: d,
+        };
+      }
+    }
+
+    if (best.diff <= tolerance && best.amount !== Number(cur.amount)) {
+      applyAmountToParsedRow(cur, best.amount);
+      cur.validation.balance_check = 'passed_after_scale_fix';
+      cur.validation.scale_fixed_amount = best.amount;
+      cur.validation.balance_diff = Math.round(best.diff * 100) / 100;
+      continue;
+    }
+
+    const debit = Number(cur.debit || 0);
+    const credit = Number(cur.credit || 0);
+
     const expectedCurrentBalance =
-      Number(nextOlder.balance) - Number(cur.debit || 0) + Number(cur.credit || 0);
+      Number(nextOlder.balance) - debit + credit;
 
     const diff2 = Math.abs(expectedCurrentBalance - Number(cur.balance));
 
     if (diff2 <= tolerance) {
       cur.validation.balance_check = 'passed_forward_order';
       cur.validation.balance_diff = Math.round(diff2 * 100) / 100;
-    } else {
-      cur.validation.balance_check = 'failed';
-      cur.validation.balance_diff = Math.round(Math.min(diff, diff2) * 100) / 100;
+      continue;
+    }
+
+    cur.validation.balance_check = 'failed';
+    cur.validation.balance_diff = Math.round(Math.min(baseDiff, diff2) * 100) / 100;
+
+    if (
+      Number(cur.amount) >= 10000 &&
+      !/\bSALARY\b/i.test(cur.merchant)
+    ) {
+      cur.validation.exclude_from_pl = true;
     }
   }
 
@@ -812,20 +1001,32 @@ function parseAccountTableDeterministic(text) {
 
   validateRunningBalances(parsed);
 
-  const rows = parsed.map(r => makeTxn({
-    date: r.date,
-    merchant: r.merchant,
-    reference: r.reference,
-    amount: r.amount,
-    direction: r.direction,
-    parser: 'account_table',
-    statement_type: 'bank_account',
-    raw: r.raw,
-    debit: r.debit,
-    credit: r.credit,
-    balance: r.balance,
-    validation: r.validation,
-  }));
+  const rows = parsed.map(r => {
+    const txn = makeTxn({
+      date: r.date,
+      merchant: r.merchant,
+      reference: r.reference,
+      amount: r.amount,
+      direction: r.direction,
+      parser: 'account_table',
+      statement_type: 'bank_account',
+      raw: r.raw,
+      debit: r.debit,
+      credit: r.credit,
+      balance: r.balance,
+      validation: r.validation,
+    });
+
+    if (txn && r.validation && r.validation.exclude_from_pl) {
+      txn.cat = 'internal_transfer';
+      txn.sub = 'parser_review_excluded';
+      txn.type = 'review_excluded';
+      txn.excluded_from_pl = true;
+      txn.note = 'Excluded because account parser detected possible balance/scale corruption.';
+    }
+
+    return txn;
+  });
 
   return {
     rows: compactRows(rows),
@@ -913,7 +1114,7 @@ function makeParseReport({ filename, parser, rows, cleaned, candidates, accountR
     balance_passed: rows.filter(r => r.validation && String(r.validation.balance_check || '').startsWith('passed')).length,
     balance_failed: rows.filter(r => r.validation && r.validation.balance_check === 'failed').length,
     balance_ai_parsed: rows.filter(r => r.validation && r.validation.balance_check === 'ai_parsed').length,
-    balance_not_checked: rows.filter(r => r.validation && ['pending', 'not_checked', 'edge_row', 'missing_balance'].includes(r.validation.balance_check)).length,
+    balance_not_checked: rows.filter(r => r.validation && ['pending', 'not_checked', 'edge_row', 'missing_balance', 'suspected_balance_leak'].includes(r.validation.balance_check)).length,
     balance_used_as_amount: rows.filter(r => r.validation && r.validation.balance_used_as_amount === true).length,
   };
 
