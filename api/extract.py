@@ -1,18 +1,28 @@
 from http.server import BaseHTTPRequestHandler
 from io import BytesIO
+from email.parser import BytesParser
+from email.policy import default
 import json
 import re
-import cgi
+import traceback
 import pdfplumber
 
 
-VERSION = "pdfplumber-extract-v19"
+VERSION = "pdfplumber-extract-v19b-no-cgi"
 
 
 def cors_headers(handler):
     handler.send_header("Access-Control-Allow-Origin", "*")
     handler.send_header("Access-Control-Allow-Methods", "POST, OPTIONS")
     handler.send_header("Access-Control-Allow-Headers", "Content-Type")
+
+
+def send_json(handler, status, payload):
+    handler.send_response(status)
+    cors_headers(handler)
+    handler.send_header("Content-Type", "application/json")
+    handler.end_headers()
+    handler.wfile.write(json.dumps(payload).encode("utf-8"))
 
 
 def clean_cell(value):
@@ -87,7 +97,6 @@ def find_account_header(row):
         elif "balance" in h:
             mapping["balance"] = i
 
-    # Fallback for common 7-column bank table.
     if mapping["postingDate"] is None and len(row) >= 7:
         mapping = {
             "postingDate": 0,
@@ -144,8 +153,8 @@ def parse_account_table(table, page_no):
         balance = amountish(get_cell(row, header_map["balance"]))
 
         raw = " ".join(clean_cell(c) for c in row if clean_cell(c))
-
         upper_raw = raw.upper()
+
         if not raw:
             continue
         if "OPENING BALANCE" in upper_raw or "CLOSING BALANCE" in upper_raw:
@@ -251,70 +260,68 @@ def extract_pdf_tables(pdf_bytes):
     return all_rows, diagnostics
 
 
+def extract_file_from_multipart(headers, body):
+    content_type = headers.get("Content-Type", "")
+
+    if "multipart/form-data" not in content_type:
+        raise ValueError("Expected multipart/form-data upload.")
+
+    pseudo_message = (
+        f"Content-Type: {content_type}\r\n"
+        "MIME-Version: 1.0\r\n"
+        "\r\n"
+    ).encode("utf-8") + body
+
+    msg = BytesParser(policy=default).parsebytes(pseudo_message)
+
+    if not msg.is_multipart():
+        raise ValueError("Upload body was not multipart.")
+
+    for part in msg.iter_parts():
+        disposition = part.get("Content-Disposition", "")
+
+        if 'name="file"' in disposition:
+            payload = part.get_payload(decode=True)
+
+            if not payload:
+                raise ValueError("Uploaded file was empty.")
+
+            return payload
+
+    raise ValueError("No multipart field named file was found.")
+
+
 class handler(BaseHTTPRequestHandler):
     def do_OPTIONS(self):
-        self.send_response(200)
-        cors_headers(self)
-        self.end_headers()
+        send_json(self, 200, {"ok": True, "extractor_version": VERSION})
 
     def do_POST(self):
         try:
-            content_type = self.headers.get("Content-Type", "")
+            content_length = int(self.headers.get("Content-Length", "0"))
 
-            if "multipart/form-data" not in content_type:
-                self.send_response(400)
-                cors_headers(self)
-                self.send_header("Content-Type", "application/json")
-                self.end_headers()
-                self.wfile.write(json.dumps({
-                    "error": "expected_multipart",
-                    "message": "Send the PDF as multipart/form-data with field name file."
-                }).encode("utf-8"))
-                return
+            if content_length <= 0:
+                return send_json(self, 400, {
+                    "error": "empty_request",
+                    "message": "No request body received.",
+                    "extractor_version": VERSION,
+                })
 
-            form = cgi.FieldStorage(
-                fp=self.rfile,
-                headers=self.headers,
-                environ={
-                    "REQUEST_METHOD": "POST",
-                    "CONTENT_TYPE": content_type,
-                }
-            )
+            body = self.rfile.read(content_length)
+            pdf_bytes = extract_file_from_multipart(self.headers, body)
 
-            file_item = form["file"] if "file" in form else None
-           
-    if file_item is None or getattr(file_item, "file", None) is None:
-    self.send_response(400)
-    cors_headers(self)
-    self.send_header("Content-Type", "application/json")
-    self.end_headers()
-    self.wfile.write(json.dumps({
-        "error": "missing_file",
-        "message": "No PDF file uploaded."
-    }).encode("utf-8"))
-    return
-
-            pdf_bytes = file_item.file.read()
             rows, diagnostics = extract_pdf_tables(pdf_bytes)
 
-            self.send_response(200)
-            cors_headers(self)
-            self.send_header("Content-Type", "application/json")
-            self.end_headers()
-            self.wfile.write(json.dumps({
+            return send_json(self, 200, {
                 "extractor_version": VERSION,
                 "tableRows": rows,
                 "rowCount": len(rows),
                 "diagnostics": diagnostics,
-            }).encode("utf-8"))
+            })
 
         except Exception as exc:
-            self.send_response(500)
-            cors_headers(self)
-            self.send_header("Content-Type", "application/json")
-            self.end_headers()
-            self.wfile.write(json.dumps({
+            return send_json(self, 500, {
                 "error": "extract_failed",
                 "message": str(exc),
+                "trace": traceback.format_exc()[-2500:],
                 "extractor_version": VERSION,
-            }).encode("utf-8"))
+            })
