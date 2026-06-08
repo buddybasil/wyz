@@ -27,368 +27,64 @@
   --purple:#7d4cff;
   --r:20px;
 }
-
 *{box-sizing:border-box}
-
-body{
-  margin:0;
-  background:var(--bg);
-  color:var(--ink);
-  font-family:'DM Sans',system-ui,-apple-system,Segoe UI,sans-serif;
-}
-
-.top{
-  height:76px;
-  background:var(--card);
-  border-bottom:1px solid var(--line);
-  display:flex;
-  align-items:center;
-  justify-content:space-between;
-  padding:0 28px;
-  position:sticky;
-  top:0;
-  z-index:5;
-}
-
-.brand{
-  display:flex;
-  gap:12px;
-  align-items:center;
-  font-weight:800;
-  font-size:22px;
-}
-
-.logo{
-  width:38px;
-  height:38px;
-  border-radius:12px;
-  background:#161412;
-  color:white;
-  display:grid;
-  place-items:center;
-}
-
-.pill{
-  padding:7px 12px;
-  border:1px solid #b6e5c9;
-  background:#ecfff4;
-  color:#087644;
-  border-radius:999px;
-  font-weight:700;
-  font-size:13px;
-}
-
-.wrap{
-  max-width:1160px;
-  margin:0 auto;
-  padding:34px 22px 70px;
-}
-
-.hero{
-  display:grid;
-  grid-template-columns:1.1fr .9fr;
-  gap:24px;
-  align-items:start;
-}
-
-.card{
-  background:var(--card);
-  border:1px solid var(--line);
-  border-radius:var(--r);
-  box-shadow:var(--shadow);
-}
-
-.upload{padding:28px}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:'DM Sans',system-ui,-apple-system,Segoe UI,sans-serif}
+.top{height:76px;background:var(--card);border-bottom:1px solid var(--line);display:flex;align-items:center;justify-content:space-between;padding:0 28px;position:sticky;top:0;z-index:5}
+.brand{display:flex;gap:12px;align-items:center;font-weight:800;font-size:22px}
+.logo{width:38px;height:38px;border-radius:12px;background:#161412;color:white;display:grid;place-items:center}
+.pill{padding:7px 12px;border:1px solid #b6e5c9;background:#ecfff4;color:#087644;border-radius:999px;font-weight:700;font-size:13px}
+.wrap{max-width:1160px;margin:0 auto;padding:34px 22px 70px}
+.hero{display:grid;grid-template-columns:1.1fr .9fr;gap:24px;align-items:start}
+.card{background:var(--card);border:1px solid var(--line);border-radius:var(--r);box-shadow:var(--shadow)}
+.upload,.side{padding:28px}
 .upload h1{font-size:30px;margin:0 0 8px}
 .upload p{color:var(--muted);margin:0 0 22px;line-height:1.55}
-
-.drop{
-  border:2px dashed #d8d1ca;
-  border-radius:18px;
-  padding:36px;
-  text-align:center;
-  background:#fff;
-  cursor:pointer;
-}
-
-.drop:hover{
-  border-color:#222;
-  background:#fffdf8;
-}
-
-.drop svg{
-  width:46px;
-  height:46px;
-  color:var(--green);
-}
-
-.drop strong{
-  display:block;
-  font-size:20px;
-  margin:10px 0 4px;
-}
-
+.drop{border:2px dashed #d8d1ca;border-radius:18px;padding:36px;text-align:center;background:#fff;cursor:pointer}
+.drop:hover{border-color:#222;background:#fffdf8}
+.drop svg{width:46px;height:46px;color:var(--green)}
+.drop strong{display:block;font-size:20px;margin:10px 0 4px}
 .drop span{color:var(--muted)}
-
-.chips{
-  margin-top:12px;
-  display:flex;
-  justify-content:center;
-  gap:8px;
-}
-
-.chip{
-  font-size:12px;
-  border:1px solid var(--line);
-  background:#fbfaf7;
-  padding:5px 10px;
-  border-radius:999px;
-}
-
-.files{
-  margin-top:16px;
-  display:grid;
-  gap:10px;
-}
-
-.file{
-  display:flex;
-  align-items:center;
-  justify-content:space-between;
-  border:1px solid var(--line);
-  background:#fff;
-  border-radius:13px;
-  padding:12px 14px;
-}
-
-.file small{color:var(--muted)}
-
-button{
-  appearance:none;
-  border:0;
-  background:#161412;
-  color:#fff;
-  border-radius:13px;
-  padding:15px 20px;
-  font-weight:800;
-  font-size:16px;
-  cursor:pointer;
-}
-
-button:disabled{
-  opacity:.45;
-  cursor:not-allowed;
-}
-
-.primary{
-  width:100%;
-  margin-top:16px;
-}
-
-.ghostBtn{
-  background:#fff;
-  color:#171411;
-  border:1px solid var(--line);
-}
-
-.smallBtn{
-  padding:10px 12px;
-  font-size:13px;
-  border-radius:11px;
-}
-
-.side{padding:22px}
+.chips{margin-top:12px;display:flex;justify-content:center;gap:8px}
+.chip{font-size:12px;border:1px solid var(--line);background:#fbfaf7;padding:5px 10px;border-radius:999px}
+.files{margin-top:16px;display:grid;gap:10px}
+.file{display:flex;align-items:center;justify-content:space-between;border:1px solid var(--line);background:#fff;border-radius:13px;padding:12px 14px}
+.file small,.mini{color:var(--muted);font-size:12px}
+button{appearance:none;border:0;background:#161412;color:#fff;border-radius:13px;padding:15px 20px;font-weight:800;font-size:16px;cursor:pointer}
+button:disabled{opacity:.45;cursor:not-allowed}
+.primary{width:100%;margin-top:16px}
+.ghostBtn{background:#fff;color:#171411;border:1px solid var(--line)}
+.smallBtn{padding:10px 12px;font-size:13px;border-radius:11px}
 .side h2{margin:0 0 14px;font-size:18px}
-
-.status{
-  display:grid;
-  gap:10px;
-}
-
-.step{
-  display:flex;
-  gap:10px;
-  align-items:center;
-  color:var(--muted);
-}
-
-.dot{
-  width:10px;
-  height:10px;
-  border-radius:50%;
-  background:#ddd;
-}
-
-.step.on{
-  color:var(--ink);
-  font-weight:700;
-}
-
+.status{display:grid;gap:10px}
+.step{display:flex;gap:10px;align-items:center;color:var(--muted)}
+.dot{width:10px;height:10px;border-radius:50%;background:#ddd}
+.step.on{color:var(--ink);font-weight:700}
 .step.on .dot{background:var(--green)}
-
-.msg{
-  margin-top:16px;
-  padding:14px;
-  border-radius:14px;
-  border:1px solid var(--line);
-  background:var(--soft);
-  color:var(--muted);
-  line-height:1.45;
-}
-
-.msg.err{
-  background:#fff2f0;
-  border-color:#f0b1aa;
-  color:#ab241b;
-}
-
-.msg.ok{
-  background:#effbf3;
-  border-color:#bfe6cd;
-  color:#0b6c43;
-}
-
-.dashboard{
-  display:none;
-  margin-top:26px;
-}
-
-.section{
-  margin-top:16px;
-  overflow:hidden;
-}
-
-details.section>summary{
-  list-style:none;
-  cursor:pointer;
-  display:flex;
-  align-items:center;
-  justify-content:space-between;
-  padding:16px 18px;
-  font-weight:800;
-  font-size:18px;
-}
-
+.msg{margin-top:16px;padding:14px;border-radius:14px;border:1px solid var(--line);background:var(--soft);color:var(--muted);line-height:1.45}
+.msg.err{background:#fff2f0;border-color:#f0b1aa;color:#ab241b}
+.msg.ok{background:#effbf3;border-color:#bfe6cd;color:#0b6c43}
+.dashboard{display:none;margin-top:26px}
+.section{margin-top:16px;overflow:hidden}
+details.section>summary{list-style:none;cursor:pointer;display:flex;align-items:center;justify-content:space-between;padding:16px 18px;font-weight:800;font-size:18px}
 details.section>summary::-webkit-details-marker{display:none}
-
-.summaryMeta{
-  font-size:12px;
-  color:var(--muted);
-  font-weight:600;
-  margin-left:8px;
-}
-
-.chev{
-  width:28px;
-  height:28px;
-  border-radius:999px;
-  border:1px solid var(--line);
-  display:inline-flex;
-  align-items:center;
-  justify-content:center;
-  color:var(--muted);
-}
-
+.summaryMeta{font-size:12px;color:var(--muted);font-weight:600;margin-left:8px}
+.chev{width:28px;height:28px;border-radius:999px;border:1px solid var(--line);display:inline-flex;align-items:center;justify-content:center;color:var(--muted)}
 details[open] .chev{transform:rotate(180deg)}
-
 .sectionBody{padding:0 18px 18px}
-
-.grid{
-  display:grid;
-  grid-template-columns:repeat(auto-fit,minmax(170px,1fr));
-  gap:14px;
-}
-
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:14px}
 .metric{padding:18px}
-
-.metric span{
-  display:block;
-  color:var(--muted);
-  font-size:13px;
-}
-
-.metric strong{
-  display:block;
-  margin-top:5px;
-  font-size:24px;
-}
-
-.metric small{
-  display:block;
-  color:var(--muted);
-  margin-top:4px;
-  font-size:12px;
-}
-
-.tools{
-  display:flex;
-  flex-wrap:wrap;
-  gap:10px;
-  align-items:center;
-  justify-content:space-between;
-  margin:4px 0 12px;
-}
-
-.tools input,
-.tools select{
-  border:1px solid var(--line);
-  border-radius:12px;
-  background:#fff;
-  padding:12px;
-  font:inherit;
-  min-width:180px;
-}
-
-.tableWrap{
-  overflow:auto;
-  border-radius:18px;
-  border:1px solid var(--line);
-  background:#fff;
-  max-height:620px;
-}
-
-table{
-  width:100%;
-  border-collapse:collapse;
-  font-size:14px;
-}
-
-th,td{
-  padding:12px 14px;
-  border-bottom:1px solid var(--line);
-  text-align:left;
-  vertical-align:top;
-  white-space:nowrap;
-}
-
-th{
-  position:sticky;
-  top:0;
-  background:#fbfaf7;
-  z-index:1;
-  color:#5f5952;
-}
-
-.merchant{
-  white-space:normal;
-  min-width:360px;
-}
-
-.refcol{
-  white-space:normal;
-  min-width:150px;
-}
-
-.tag{
-  display:inline-block;
-  border-radius:999px;
-  padding:4px 9px;
-  font-size:12px;
-  font-weight:800;
-  background:#f2eee8;
-  color:#4b453e;
-}
-
+.metric span{display:block;color:var(--muted);font-size:13px}
+.metric strong{display:block;margin-top:5px;font-size:24px}
+.metric small{display:block;color:var(--muted);margin-top:4px;font-size:12px}
+.tools{display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between;margin:4px 0 12px}
+.tools input,.tools select{border:1px solid var(--line);border-radius:12px;background:#fff;padding:12px;font:inherit;min-width:180px}
+.tableWrap{overflow:auto;border-radius:18px;border:1px solid var(--line);background:#fff;max-height:620px}
+table{width:100%;border-collapse:collapse;font-size:14px}
+th,td{padding:12px 14px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top;white-space:nowrap}
+th{position:sticky;top:0;background:#fbfaf7;z-index:1;color:#5f5952}
+.merchant{white-space:normal;min-width:360px}
+.refcol{white-space:normal;min-width:150px}
+.tag{display:inline-block;border-radius:999px;padding:4px 9px;font-size:12px;font-weight:800;background:#f2eee8;color:#4b453e}
 .tag.CR{background:#e9f8ef;color:#087644}
 .tag.DR{background:#fff0ed;color:#a83225}
 .tag.savings{background:#f0ecff;color:#6036c7}
@@ -396,159 +92,43 @@ th{
 .tag.review{background:#fff7db;color:#8a5a00}
 .tag.duplicate{background:#eef0f3;color:#555}
 .tag.pair{background:#eaf1ff;color:#174ba6}
-
-.insight{
-  padding:18px;
-  background:#161412;
-  color:#fff;
-  border-radius:18px;
-}
-
+.insight{padding:18px;background:#161412;color:#fff;border-radius:18px}
 .insight h3{margin:0 0 6px}
-
-.insight ul{
-  margin:10px 0 0;
-  padding-left:18px;
-  color:#f0ece6;
-}
-
-.qrow{
-  display:grid;
-  grid-template-columns:1.5fr .55fr .55fr .8fr 1.6fr;
-  gap:10px;
-  padding:10px;
-  border-top:1px solid var(--line);
-  align-items:start;
-}
-
+.insight ul{margin:10px 0 0;padding-left:18px;color:#f0ece6}
+.qrow{display:grid;grid-template-columns:1.5fr .55fr .55fr .8fr 1.6fr;gap:10px;padding:10px;border-top:1px solid var(--line);align-items:start}
 .qrow:first-of-type{border-top:0}
-
 .qok{color:var(--green);font-weight:800}
 .qwarn{color:var(--amber);font-weight:800}
 .qfail{color:var(--red);font-weight:800}
-
-.mini{
-  font-size:12px;
-  color:var(--muted);
-}
-
-.chartNote{
-  margin:0 0 10px;
-  color:var(--muted);
-  font-size:13px;
-  line-height:1.5;
-}
-
-.chartWrap{
-  border:1px solid var(--line);
-  border-radius:18px;
-  background:#fff;
-  padding:10px 12px;
-}
-
-.legend{
-  display:flex;
-  flex-wrap:wrap;
-  gap:12px;
-  margin:4px 0 8px;
-}
-
-.legend span{
-  display:inline-flex;
-  align-items:center;
-  gap:7px;
-  font-size:13px;
-  color:var(--muted);
-}
-
-.legend i{
-  display:inline-block;
-  width:12px;
-  height:12px;
-  border-radius:999px;
-}
-
-.chartSvg{
-  width:100%;
-  height:auto;
-  display:block;
-}
-
+.chartNote{margin:0 0 10px;color:var(--muted);font-size:13px;line-height:1.5}
+.chartWrap{border:1px solid var(--line);border-radius:18px;background:#fff;padding:10px 12px}
+.legend{display:flex;flex-wrap:wrap;gap:12px;margin:4px 0 8px}
+.legend span{display:inline-flex;align-items:center;gap:7px;font-size:13px;color:var(--muted)}
+.legend i{display:inline-block;width:12px;height:12px;border-radius:999px}
+.chartSvg{width:100%;height:auto;display:block}
 .chartAxis{font-size:11px;fill:#8b847d}
 .chartGrid{stroke:#ece6de;stroke-width:1}
 .chartFrame{stroke:#ded7cf;stroke-width:1;fill:none}
 .chartDot{stroke:#fff;stroke-width:2}
 .seriesLabel{font-size:11px;font-weight:800}
-
-.statStrip{
-  display:grid;
-  grid-template-columns:repeat(auto-fit,minmax(120px,1fr));
-  gap:10px;
-  margin-top:10px;
-}
-
-.tinyCard{
-  border:1px solid var(--line);
-  border-radius:14px;
-  padding:10px 12px;
-  background:#fbfaf7;
-}
-
-.tinyCard b{
-  display:block;
-  font-size:16px;
-}
-
-.tinyCard span{
-  display:block;
-  color:var(--muted);
-  font-size:12px;
-}
-
-.group{
-  border:1px solid var(--line);
-  border-radius:16px;
-  background:#fff;
-  margin-bottom:12px;
-  overflow:hidden;
-}
-
-.groupHead{
-  display:flex;
-  justify-content:space-between;
-  gap:12px;
-  padding:12px 14px;
-  background:#fbfaf7;
-  border-bottom:1px solid var(--line);
-}
-
+.statStrip{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:10px;margin-top:10px}
+.tinyCard{border:1px solid var(--line);border-radius:14px;padding:10px 12px;background:#fbfaf7}
+.tinyCard b{display:block;font-size:16px}
+.tinyCard span{display:block;color:var(--muted);font-size:12px}
+.group{border:1px solid var(--line);border-radius:16px;background:#fff;margin-bottom:12px;overflow:hidden}
+.groupHead{display:flex;justify-content:space-between;gap:12px;padding:12px 14px;background:#fbfaf7;border-bottom:1px solid var(--line)}
 .groupHead b{display:block}
 .groupHead span{display:block;color:var(--muted);font-size:12px;margin-top:3px}
-
-.groupRows{
-  display:grid;
-}
-
-.grow{
-  display:grid;
-  grid-template-columns:.7fr .8fr .7fr 1.7fr .9fr .8fr;
-  gap:10px;
-  padding:10px 14px;
-  border-top:1px solid var(--line);
-  align-items:start;
-  font-size:13px;
-}
-
+.groupRows{display:grid}
+.grow{display:grid;grid-template-columns:.7fr .8fr .7fr 1.7fr .9fr .8fr;gap:10px;padding:10px 14px;border-top:1px solid var(--line);align-items:start;font-size:13px}
 .grow:first-child{border-top:0}
-
 @media(max-width:880px){
   .hero{grid-template-columns:1fr}
   .top{padding:0 18px}
   .wrap{padding:24px 14px}
   .drop{padding:24px}
   th,td{padding:10px}
-  .qrow{grid-template-columns:1fr}
-  .grow{grid-template-columns:1fr}
+  .qrow,.grow{grid-template-columns:1fr}
   .sectionBody{padding:0 12px 12px}
 }
 </style>
@@ -564,11 +144,11 @@ th{
   <section class="hero">
     <div class="card upload">
       <h1>Upload your statements</h1>
-      <p>PDF or CSV — credit cards, bank accounts and payslips. Account-statement balances are never used as transaction amounts and are checked only as a running-balance validation.</p>
+      <p>PDF or CSV — credit cards, bank accounts and payslips. Account-statement balances are never used as transaction amounts. Large files are split safely if needed.</p>
 
-      <div id="drop" class="drop" style="position:relative">
-        <input id="fileInput" type="file" multiple accept=".pdf,.csv,.txt"
-          style="position:absolute;inset:0;width:100%;height:100%;opacity:0;cursor:pointer;z-index:2">
+      <input id="fileInput" type="file" multiple accept=".pdf,.csv,.txt" hidden>
+
+      <div id="drop" class="drop">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
           <path d="M12 16V4"/>
           <path d="m7 9 5-5 5 5"/>
@@ -591,8 +171,8 @@ th{
     <div class="card side">
       <h2>Processing status</h2>
       <div class="status">
-        <div id="s1" class="step"><div class="dot"></div>Reading file text with layout preservation</div>
-        <div id="s2" class="step"><div class="dot"></div>Applying deterministic parsers</div>
+        <div id="s1" class="step"><div class="dot"></div>Reading PDF text and stripping timestamp noise</div>
+        <div id="s2" class="step"><div class="dot"></div>Sending to parser / AI account parser</div>
         <div id="s3" class="step"><div class="dot"></div>Running duplicate / pair checks</div>
         <div id="s4" class="step"><div class="dot"></div>Building dashboard</div>
       </div>
@@ -608,31 +188,11 @@ th{
       <summary>Summary cards <span class="chev">⌃</span></summary>
       <div class="sectionBody">
         <div class="grid">
-          <div class="card metric">
-            <span>Income</span>
-            <strong id="mIncome">AED 0</strong>
-            <small>Credits counted in P/L</small>
-          </div>
-          <div class="card metric">
-            <span>Expenses</span>
-            <strong id="mExpenses">AED 0</strong>
-            <small>Debits counted in P/L</small>
-          </div>
-          <div class="card metric">
-            <span>Savings</span>
-            <strong id="mSavings">AED 0</strong>
-            <small>User-selected savings/investments</small>
-          </div>
-          <div class="card metric">
-            <span>Ignored / excluded</span>
-            <strong id="mIgnored">AED 0</strong>
-            <small>Transfers, settlements, duplicates</small>
-          </div>
-          <div class="card metric">
-            <span>Net P/L</span>
-            <strong id="mPL">AED 0</strong>
-            <small>Income - expenses - savings</small>
-          </div>
+          <div class="card metric"><span>Income</span><strong id="mIncome">AED 0</strong><small>Credits counted in P/L</small></div>
+          <div class="card metric"><span>Expenses</span><strong id="mExpenses">AED 0</strong><small>Debits counted in P/L</small></div>
+          <div class="card metric"><span>Savings</span><strong id="mSavings">AED 0</strong><small>User-selected savings/investments</small></div>
+          <div class="card metric"><span>Ignored / excluded</span><strong id="mIgnored">AED 0</strong><small>Transfers, settlements, duplicates</small></div>
+          <div class="card metric"><span>Net P/L</span><strong id="mPL">AED 0</strong><small>Income - expenses - savings</small></div>
         </div>
       </div>
     </details>
@@ -657,9 +217,7 @@ th{
     <details id="reconPanel" class="card section" open style="display:none">
       <summary>Duplicate / cross-statement checks <span class="summaryMeta" id="reconMeta"></span><span class="chev">⌃</span></summary>
       <div class="sectionBody">
-        <div class="msg">
-          Exact duplicate uploads and strong card-payment pairs are excluded automatically. Possible fuzzy duplicates are listed for review but not automatically excluded.
-        </div>
+        <div class="msg">Exact duplicate uploads and strong card-payment pairs are excluded automatically. Possible fuzzy duplicates are listed for review but not automatically excluded.</div>
         <div id="reconRows"></div>
       </div>
     </details>
@@ -676,9 +234,7 @@ th{
 
     <details id="qualityPanel" class="card section" open style="display:none">
       <summary>Parse quality report <span class="chev">⌃</span></summary>
-      <div class="sectionBody">
-        <div id="qualityRows"></div>
-      </div>
+      <div class="sectionBody"><div id="qualityRows"></div></div>
     </details>
 
     <details class="card section" open>
@@ -732,7 +288,8 @@ th{
 
 <script>
 const API_URL = '/api/analyze';
-const STORAGE_KEY = 'wyz.saved.generic.v9';
+const STORAGE_KEY = 'wyz.saved.generic.v10';
+const MAX_CHARS_PER_REQUEST = 520000;
 
 const state = {
   files: [],
@@ -743,9 +300,7 @@ const state = {
 
 const el = id => document.getElementById(id);
 
-const money = n => 'AED ' + (Number(n) || 0).toLocaleString(undefined, {
-  maximumFractionDigits: 2
-});
+const money = n => 'AED ' + (Number(n) || 0).toLocaleString(undefined, { maximumFractionDigits: 2 });
 
 const setStep = n => {
   ['s1','s2','s3','s4'].forEach((id, i) => {
@@ -761,6 +316,7 @@ const setMsg = (html, cls = '') => {
 pdfjsLib.GlobalWorkerOptions.workerSrc =
   'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
 
+el('drop').onclick = () => el('fileInput').click();
 el('fileInput').onchange = e => addFiles([...e.target.files]);
 
 ['dragenter','dragover'].forEach(ev => {
@@ -777,7 +333,7 @@ el('fileInput').onchange = e => addFiles([...e.target.files]);
   });
 });
 
-el('drop').addEventListener('drop', e => { e.preventDefault(); e.stopPropagation(); addFiles([...e.dataTransfer.files]); });
+el('drop').addEventListener('drop', e => addFiles([...e.dataTransfer.files]));
 
 window.addEventListener('resize', () => {
   if (state.transactions.length) renderTrendChart();
@@ -789,7 +345,6 @@ function addFiles(files) {
       state.files.push(f);
     }
   }
-
   renderFiles();
 }
 
@@ -812,12 +367,12 @@ window.removeFile = i => {
   renderFiles();
 };
 
-// Regex to detect standalone time tokens of the form HH:MM or HH:MM:SS.
-// These appear as separate pdf.js text items in ADCB Islamic account statement PDFs.
-// When assembled into a line by X-coordinate sort they cause their digits to bleed
-// into adjacent amount columns, corrupting values by roughly 10x.
-// Filtering them here (before joining items into a line) prevents the corruption.
-const STANDALONE_TIME_RE = /^\d{1,2}:\d{2}(:\d{2})?$/;
+function cleanExtractedLine(s) {
+  return String(s || '')
+    .replace(/\b\d{1,2}:\d{2}(?::\d{2})?\b/g, ' ')
+    .replace(/[ \t]+/g, ' ')
+    .trim();
+}
 
 async function extractPdfText(file) {
   const ab = await file.arrayBuffer();
@@ -834,16 +389,14 @@ async function extractPdfText(file) {
     const rows = {};
 
     for (const item of content.items) {
-      const str = (item.str || '').trim();
+      let str = (item.str || '').trim();
       if (!str) continue;
 
-      // Skip standalone time tokens (HH:MM or HH:MM:SS).
-      // ADCB Islamic account statements include a timestamp column whose items
-      // sit at the same Y coordinate as amount column items. Without filtering,
-      // the time token's digits merge into adjacent amounts during X-sort join,
-      // inflating them by approximately 10x. This filter is the primary fix;
-      // the backend also strips these patterns as a second line of defence.
-      if (STANDALONE_TIME_RE.test(str)) continue;
+      // Timestamp tokens in account statements can bleed into amount fields.
+      if (/^\d{1,2}:\d{2}(?::\d{2})?$/.test(str)) continue;
+
+      str = cleanExtractedLine(str);
+      if (!str) continue;
 
       const y = Math.round(item.transform[5]);
       const x = item.transform[4];
@@ -854,8 +407,11 @@ async function extractPdfText(file) {
 
     const pageLines = Object.keys(rows)
       .map(Number)
-      .sort((a,b) => b - a)
-      .map(y => rows[y].sort((a,b) => a.x - b.x).map(i => i.str).join(' '))
+      .sort((a, b) => b - a)
+      .map(y => cleanExtractedLine(
+        rows[y].sort((a, b) => a.x - b.x).map(i => i.str).join(' ')
+      ))
+      .filter(Boolean)
       .join('\n');
 
     text += pageLines + '\n';
@@ -868,10 +424,33 @@ async function extractText(file) {
   const name = file.name.toLowerCase();
 
   if (name.endsWith('.pdf')) return extractPdfText(file);
-  if (name.endsWith('.csv')) return file.text();
-  if (name.endsWith('.txt')) return file.text();
+  if (name.endsWith('.csv') || name.endsWith('.txt')) return file.text();
 
   throw new Error('Unsupported file. Please upload PDF, CSV, or TXT.');
+}
+
+function splitTextIntoSafeChunks(text) {
+  const raw = String(text || '');
+
+  if (raw.length <= MAX_CHARS_PER_REQUEST) {
+    return [raw];
+  }
+
+  const lines = raw.split('\n');
+  const chunks = [];
+  let cur = '';
+
+  for (const line of lines) {
+    if ((cur.length + line.length + 1) > MAX_CHARS_PER_REQUEST && cur.trim()) {
+      chunks.push(cur.trim());
+      cur = '';
+    }
+    cur += line + '\n';
+  }
+
+  if (cur.trim()) chunks.push(cur.trim());
+
+  return chunks.length ? chunks : [raw.slice(0, MAX_CHARS_PER_REQUEST)];
 }
 
 async function postJson(payload) {
@@ -893,72 +472,107 @@ async function postJson(payload) {
   return data;
 }
 
-// Split extracted PDF text into ~25k-char chunks at natural date-line boundaries
-// so each chunk fits within Vercel's 60s per-request timeout.
-const CHUNK_SIZE = 25000;
-const MAX_CONCURRENT = 3;
-
-function splitTextIntoChunks(text) {
-  if (text.length <= CHUNK_SIZE) return [text];
-
-  const chunks = [];
-  let start = 0;
-
-  while (start < text.length) {
-    if (start + CHUNK_SIZE >= text.length) {
-      chunks.push(text.slice(start));
-      break;
-    }
-
-    // Look ahead up to 2000 chars for the next date line to split on
-    let splitAt = start + CHUNK_SIZE;
-    const window = text.slice(splitAt, splitAt + 2000);
-    const dateMatch = window.match(/
-(\d{1,2}[\/\-]\d{1,2}[\/\-]\d{4}|\d{4}[\/\-]\d{1,2}[\/\-]\d{1,2})/);
-    if (dateMatch) splitAt += dateMatch.index;
-
-    chunks.push(text.slice(start, splitAt));
-    start = splitAt;
-  }
-
-  return chunks.filter(c => c.trim());
-}
-
-// Send chunks concurrently (MAX_CONCURRENT at a time) and merge results.
-async function analyzeTextChunked(text, filename) {
-  const chunks = splitTextIntoChunks(text);
-
-  if (chunks.length === 1) {
-    return postJson({ action: 'extract', filename, text: chunks[0] });
-  }
-
+async function parseFileThroughBackend(file, text) {
+  const chunks = splitTextIntoSafeChunks(text);
   const allTransactions = [];
-  let mergedReport = null;
-  let lastParser = null;
-  let lastVersion = null;
+  const reports = [];
+  let backendVersion = null;
+  let parser = null;
+  let warning = null;
 
-  for (let i = 0; i < chunks.length; i += MAX_CONCURRENT) {
-    const batch = chunks.slice(i, i + MAX_CONCURRENT);
-    const results = await Promise.all(
-      batch.map(chunk => postJson({ action: 'extract', filename, text: chunk }))
-    );
-    for (const data of results) {
-      allTransactions.push(...(data.transactions || []));
-      lastParser = data.parser || lastParser;
-      lastVersion = data.backend_version || lastVersion;
-      if (!mergedReport) mergedReport = data.parse_report;
+  for (let i = 0; i < chunks.length; i++) {
+    const chunkLabel = chunks.length > 1 ? ` part ${i + 1}/${chunks.length}` : '';
+    setMsg(`Parsing <b>${escapeHtml(file.name)}</b>${chunkLabel}...`);
+
+    const data = await postJson({
+      action: 'extract',
+      filename: chunks.length > 1 ? `${file.name} [part ${i + 1}]` : file.name,
+      text: chunks[i]
+    });
+
+    backendVersion = data.backend_version || backendVersion;
+    parser = data.parser || parser;
+    warning = warning || data.warning || null;
+
+    const txns = (data.transactions || []).map(t => ({
+      ...t,
+      _chunk: chunks.length > 1 ? i + 1 : null,
+      _chunkCount: chunks.length
+    }));
+
+    allTransactions.push(...txns);
+
+    if (data.parse_report) {
+      reports.push({
+        ...data.parse_report,
+        chunk: chunks.length > 1 ? i + 1 : null,
+        chunk_count: chunks.length
+      });
     }
   }
 
-  allTransactions.forEach((t, i) => { t.seq = i + 1; });
+  const combinedReport = combineParseReports(file.name, reports, allTransactions.length, parser, warning);
 
   return {
     transactions: allTransactions,
     count: allTransactions.length,
-    parser: lastParser,
-    backend_version: lastVersion,
-    parse_report: mergedReport || { status: allTransactions.length ? 'ok' : 'failed' },
-    warning: null
+    parser,
+    warning,
+    backend_version: backendVersion,
+    parse_report: combinedReport
+  };
+}
+
+function combineParseReports(filename, reports, count, parser, warning) {
+  if (!reports.length) {
+    return {
+      filename,
+      parser,
+      status: count ? 'ok' : 'failed',
+      confidence: count ? 0.85 : 0,
+      transactions_extracted: count,
+      candidate_date_rows: count,
+      warnings: warning ? [warning] : []
+    };
+  }
+
+  const candidateRows = reports.reduce((a, r) => a + (Number(r.candidate_date_rows) || 0), 0);
+  const extractedRows = reports.reduce((a, r) => a + (Number(r.transactions_extracted) || 0), 0);
+  const failed = reports.some(r => r.status === 'failed');
+  const review = reports.some(r => r.status === 'review');
+
+  const validation = reports.reduce((acc, r) => {
+    const v = r.validation_summary || {};
+    acc.balance_passed += Number(v.balance_passed) || 0;
+    acc.balance_failed += Number(v.balance_failed) || 0;
+    acc.balance_ai_parsed += Number(v.balance_ai_parsed) || 0;
+    acc.balance_not_checked += Number(v.balance_not_checked) || 0;
+    acc.balance_used_as_amount += Number(v.balance_used_as_amount) || 0;
+    return acc;
+  }, {
+    balance_passed: 0,
+    balance_failed: 0,
+    balance_ai_parsed: 0,
+    balance_not_checked: 0,
+    balance_used_as_amount: 0
+  });
+
+  const warnings = reports.flatMap(r => r.warnings || []);
+  if (warning) warnings.unshift(warning);
+
+  return {
+    filename,
+    parser,
+    status: failed ? 'failed' : review ? 'review' : 'ok',
+    confidence: candidateRows ? Math.min(0.99, extractedRows / Math.max(candidateRows, extractedRows)) : 0.85,
+    candidate_date_rows: candidateRows || count,
+    transactions_extracted: extractedRows || count,
+    rejected_rows_estimate: Math.max(0, (candidateRows || count) - (extractedRows || count)),
+    quality_scope: reports.length > 1 ? 'chunked_combined' : reports[0].quality_scope,
+    quality_note: reports.length > 1 ? `Combined ${reports.length} parse chunks.` : reports[0].quality_note,
+    table_region_detected: reports.some(r => r.table_region_detected),
+    validation_summary: validation,
+    warnings: [...new Set(warnings)].slice(0, 5)
   };
 }
 
@@ -990,9 +604,7 @@ el('analyzeBtn').onclick = async () => {
       const text = await extractText(file);
 
       setStep(2);
-      setMsg(`Parsing <b>${escapeHtml(file.name)}</b>...`);
-
-      const data = await analyzeTextChunked(text, file.name);
+      const data = await parseFileThroughBackend(file, text);
 
       if (data.backend_version) {
         console.log('Wyz backend version:', data.backend_version);
@@ -1051,6 +663,7 @@ el('analyzeBtn').onclick = async () => {
 
   state.files = [];
   renderFiles();
+
   setStep(4);
 
   if (!state.transactions.length) {
@@ -1120,6 +733,7 @@ function amountKey(n) {
 function simScore(a, b) {
   const A = new Set(normalizeDesc(a).split(' ').filter(x => x.length > 2));
   const B = new Set(normalizeDesc(b).split(' ').filter(x => x.length > 2));
+
   if (!A.size || !B.size) return 0;
 
   let inter = 0;
@@ -1178,7 +792,6 @@ function runReconciliation() {
   const groups = [];
   let gid = 1;
 
-  // 1. Exact duplicate upload detection.
   const exact = new Map();
 
   for (const t of state.transactions) {
@@ -1199,7 +812,7 @@ function runReconciliation() {
 
     if (list.length > 1 && differentFiles) {
       const groupId = `DUP-${gid++}`;
-      const sorted = [...list].sort((a,b) => a._globalSeq - b._globalSeq);
+      const sorted = [...list].sort((a, b) => a._globalSeq - b._globalSeq);
       const keep = sorted[0];
 
       keep.recon_group_id = groupId;
@@ -1222,7 +835,6 @@ function runReconciliation() {
     }
   }
 
-  // 2. Strong card-payment pair detection.
   const tx = [...state.transactions];
 
   for (let i = 0; i < tx.length; i++) {
@@ -1256,7 +868,6 @@ function runReconciliation() {
     }
   }
 
-  // 3. Possible fuzzy duplicates for review only.
   const reviewPairs = new Set();
 
   for (let i = 0; i < tx.length; i++) {
@@ -1273,8 +884,9 @@ function runReconciliation() {
       const sim = simScore(a.merchant, b.merchant);
       if (sim < 0.72) continue;
 
-      const key = [a._globalSeq, b._globalSeq].sort((x,y) => x-y).join('-');
+      const key = [a._globalSeq, b._globalSeq].sort((x, y) => x - y).join('-');
       if (reviewPairs.has(key)) continue;
+
       reviewPairs.add(key);
 
       const groupId = `REV-${gid++}`;
@@ -1433,7 +1045,7 @@ function renderTrendChart() {
     .map((r, i) => `${i === 0 ? 'M' : 'L'} ${xAt(i).toFixed(1)} ${yAt(r[key]).toFixed(1)}`)
     .join(' ');
 
-  const gridVals = Array.from({length: 5}, (_, i) => bottomVal + (i * (topVal - bottomVal) / 4));
+  const gridVals = Array.from({ length: 5 }, (_, i) => bottomVal + (i * (topVal - bottomVal) / 4));
 
   const colors = {
     income: '#0d8a53',
@@ -1509,7 +1121,7 @@ function renderQuality() {
     const version = x.backend_version ? `<br><span class="mini">${escapeHtml(x.backend_version)}</span>` : '';
 
     const val = r.validation_summary
-      ? `<br><span class="mini">Balance check: passed ${r.validation_summary.balance_passed || 0}, failed ${r.validation_summary.balance_failed || 0}, not checked ${r.validation_summary.balance_not_checked || 0}</span>`
+      ? `<br><span class="mini">Balance check: passed ${r.validation_summary.balance_passed || 0}, AI parsed ${r.validation_summary.balance_ai_parsed || 0}, failed ${r.validation_summary.balance_failed || 0}, not checked ${r.validation_summary.balance_not_checked || 0}</span>`
       : '';
 
     return `
@@ -1751,6 +1363,7 @@ el('downloadCsv').onclick = () => {
     'recon_status',
     'recon_note',
     'backend_version',
+    'chunk',
     'raw'
   ];
 
@@ -1766,7 +1379,9 @@ el('downloadCsv').onclick = () => {
                 ? t._backendVersion
                 : k === 'balance_check'
                   ? t.validation?.balance_check
-                  : t[k]
+                  : k === 'chunk'
+                    ? t._chunk
+                    : t[k]
         )
       ).join(',')
     )
@@ -1816,8 +1431,8 @@ function localInsights() {
     out.push(`${groups.length} duplicate/cross-statement group(s) detected: ${auto} auto-handled and ${review} for review.`);
   }
 
-  const best = [...monthly].sort((a,b) => b.pl - a.pl)[0];
-  const worst = [...monthly].sort((a,b) => a.pl - b.pl)[0];
+  const best = [...monthly].sort((a, b) => b.pl - a.pl)[0];
+  const worst = [...monthly].sort((a, b) => a.pl - b.pl)[0];
 
   if (best) out.push(`Best month by P/L: ${best.label} at ${money(best.pl)}.`);
   if (worst && (!best || worst.month !== best.month)) out.push(`Weakest month by P/L: ${worst.label} at ${money(worst.pl)}.`);
