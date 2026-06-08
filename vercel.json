@@ -2,6 +2,9 @@
   "functions": {
     "api/analyze.js": {
       "maxDuration": 60
+    },
+    "api/extract.py": {
+      "maxDuration": 60
     }
   }
 }
