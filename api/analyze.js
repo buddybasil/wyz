@@ -1,16 +1,15 @@
 // WYZ API - Generic Statement Analyzer
-// v16-zero-marker-balance-safe
+// v17-structured-table-first
 //
 // Core fixes:
-// - Account statements are parsed deterministically first.
-// - Account statement amount is taken ONLY from Debit Amount or Credit Amount.
-// - Balance is never used as transaction amount.
-// - Account parser uses the 0.00 marker, row kind, and balance validation.
-// - AI is no longer the primary parser for account statements.
+// - If frontend sends structured account-statement tableRows, parse those first.
+// - Structured account rows use Debit/Credit columns directly.
+// - Balance is validation only and is never used as transaction amount.
+// - Falls back to legacy deterministic parsers only when tableRows are missing.
 // - Credit card parser remains deterministic.
 // - User still decides savings, family/personal transfers, uncertain credits, etc.
 
-const BACKEND_VERSION = 'strict-account-table-v16-zero-marker-balance-safe';
+const BACKEND_VERSION = 'strict-account-table-v17-structured-table-first';
 
 const MODEL = 'claude-haiku-4-5-20251001';
 const INSIGHT_MAX_TOKENS = 450;
@@ -843,7 +842,7 @@ function parseAccountRecordDeterministic(rec0) {
 
   if (!amountToken || !direction) return null;
 
-  let amount = parseAmount(amountToken.raw);
+  const amount = parseAmount(amountToken.raw);
   if (!amount || amount <= 0) return null;
 
   const balance = balanceToken ? parseAmount(balanceToken.raw) : null;
@@ -1055,6 +1054,174 @@ function dedupePreserveOrder(items) {
   });
 
   return out;
+}
+
+function validateStructuredRunningBalances(rows) {
+  if (!rows.length) return rows;
+
+  const tolerance = 0.05;
+
+  for (let i = 0; i < rows.length; i++) {
+    const cur = rows[i];
+
+    if (!cur.validation) cur.validation = {};
+    cur.validation.balance_check = 'not_checked';
+
+    if (cur.balance == null || !Number.isFinite(Number(cur.balance))) {
+      cur.validation.balance_check = 'missing_balance';
+      continue;
+    }
+
+    const nextOlder = rows[i + 1];
+
+    if (!nextOlder || nextOlder.balance == null || !Number.isFinite(Number(nextOlder.balance))) {
+      cur.validation.balance_check = 'edge_row';
+      continue;
+    }
+
+    const debit = Number(cur.direction === 'DR' ? cur.amount : 0);
+    const credit = Number(cur.direction === 'CR' ? cur.amount : 0);
+
+    const expectedOlderBalance = Number(cur.balance) + debit - credit;
+    const diff = Math.abs(expectedOlderBalance - Number(nextOlder.balance));
+
+    if (diff <= tolerance) {
+      cur.validation.balance_check = 'passed_reverse_order';
+      cur.validation.balance_diff = Math.round(diff * 100) / 100;
+      continue;
+    }
+
+    const expectedCurrentBalance = Number(nextOlder.balance) - debit + credit;
+    const diff2 = Math.abs(expectedCurrentBalance - Number(cur.balance));
+
+    if (diff2 <= tolerance) {
+      cur.validation.balance_check = 'passed_forward_order';
+      cur.validation.balance_diff = Math.round(diff2 * 100) / 100;
+    } else {
+      cur.validation.balance_check = 'failed';
+      cur.validation.balance_diff = Math.round(Math.min(diff, diff2) * 100) / 100;
+    }
+  }
+
+  return rows;
+}
+
+function makeStructuredParseReport({ filename, rows, candidateCount }) {
+  const extracted = rows.length;
+
+  const validationSummary = {
+    balance_passed: rows.filter(r => r.validation && String(r.validation.balance_check || '').startsWith('passed')).length,
+    balance_failed: rows.filter(r => r.validation && r.validation.balance_check === 'failed').length,
+    balance_ai_parsed: 0,
+    balance_not_checked: rows.filter(r => r.validation && ['pending', 'not_checked', 'edge_row', 'missing_balance'].includes(r.validation.balance_check)).length,
+    balance_used_as_amount: rows.filter(r => r.validation && r.validation.balance_used_as_amount === true).length,
+  };
+
+  const confidence = extracted > 0
+    ? Math.min(0.99, extracted / Math.max(1, candidateCount || extracted))
+    : 0;
+
+  const status = extracted === 0
+    ? 'failed'
+    : confidence >= 0.95 && validationSummary.balance_failed === 0
+      ? 'ok'
+      : 'review';
+
+  const warnings = [];
+
+  if (status !== 'ok') {
+    warnings.push(`Structured account table extracted ${extracted} transaction rows against ${candidateCount} detected table rows. Review recommended.`);
+  }
+
+  if (validationSummary.balance_failed > 0) {
+    warnings.push(`${validationSummary.balance_failed} structured account row(s) failed running-balance validation.`);
+  }
+
+  return {
+    filename: filename || null,
+    parser: 'structured_account_table',
+    status,
+    confidence: Math.round(confidence * 100) / 100,
+    candidate_date_rows: candidateCount || extracted,
+    transactions_extracted: extracted,
+    rejected_rows_estimate: Math.max(0, (candidateCount || extracted) - extracted),
+    quality_scope: 'frontend_structured_pdf_table',
+    quality_note: 'Rows were extracted from account-statement table cells. Debit/Credit columns are used directly. Balance is validation only.',
+    table_region_detected: true,
+    validation_summary: validationSummary,
+    parser_scores: [
+      {
+        parser: 'structured_account_table',
+        rows: extracted,
+        score: extracted,
+      },
+    ],
+    sample_candidate_rows: [],
+    warnings,
+  };
+}
+
+function parseStructuredAccountTableRows(tableRows, filename = null) {
+  const rows = [];
+
+  for (const r of tableRows || []) {
+    const date = isoFromAnyDate(r.postingDate);
+    if (!date) continue;
+
+    const debit = parseAmount(r.debit);
+    const credit = parseAmount(r.credit);
+    const balance = parseAmount(r.balance);
+
+    let direction = null;
+    let amount = 0;
+
+    if (debit > 0 && credit === 0) {
+      direction = 'DR';
+      amount = debit;
+    } else if (credit > 0 && debit === 0) {
+      direction = 'CR';
+      amount = credit;
+    } else {
+      continue;
+    }
+
+    const txn = makeTxn({
+      date,
+      merchant: r.description || 'Unknown',
+      reference: r.reference || null,
+      amount,
+      direction,
+      parser: 'structured_account_table',
+      statement_type: 'bank_account',
+      raw: r.raw || null,
+      debit,
+      credit,
+      balance,
+      validation: {
+        balance_check: 'pending',
+        balance_used_as_amount: false,
+        amount_source: direction === 'DR' ? 'structured_debit_column' : 'structured_credit_column',
+      },
+    });
+
+    if (txn) rows.push(txn);
+  }
+
+  validateStructuredRunningBalances(rows);
+
+  const deduped = dedupePreserveOrder(rows);
+
+  const parse_report = makeStructuredParseReport({
+    filename,
+    rows: deduped,
+    candidateCount: Array.isArray(tableRows) ? tableRows.length : deduped.length,
+  });
+
+  return {
+    parser: deduped.length ? 'structured_account_table' : null,
+    rows: deduped,
+    parse_report,
+  };
 }
 
 function countCandidateRowsLoose(text) {
@@ -1331,7 +1498,30 @@ function parseJsonObject(raw) {
 }
 
 async function handleExtract(req, res) {
-  const { text, filename } = req.body || {};
+  const { text, filename, tableRows } = req.body || {};
+
+  if (Array.isArray(tableRows) && tableRows.length) {
+    const structured = parseStructuredAccountTableRows(tableRows, filename);
+    const summary = summarizeTransactions(structured.rows);
+
+    return res.status(200).json({
+      backend_version: BACKEND_VERSION,
+      transactions: structured.rows,
+      count: structured.rows.length,
+      filename: filename || null,
+      parser: structured.parser,
+      deterministic: true,
+      text_chars: typeof text === 'string' ? text.length : 0,
+      lines_detected: structured.rows.length,
+      total_seq: structured.rows.length,
+      skipped_lines: [],
+      summary,
+      parse_report: structured.parse_report,
+      warning: structured.parse_report.status !== 'ok'
+        ? structured.parse_report.warnings[0] || 'Structured account table needs review.'
+        : null,
+    });
+  }
 
   if (!text || typeof text !== 'string') {
     return res.status(400).json({
