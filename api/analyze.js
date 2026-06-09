@@ -1,5 +1,5 @@
 // WYZ API - Generic Statement Analyzer
-// v19-pdfplumber-validated
+// v19d-pdfplumber-validated-reasons
 //
 // Core rule:
 // - If tableRows are provided, use them as the primary source.
@@ -9,7 +9,7 @@
 // - Failed account rows are excluded from P/L by default.
 // - Text/card parsers remain as fallback.
 
-const BACKEND_VERSION = 'strict-account-table-v19-pdfplumber-validated';
+const BACKEND_VERSION = 'strict-account-table-v19d-reasons-and-fallback-fix';
 
 const NUM_SRC = String.raw`-?\(?\d{1,3}(?:,\d{3})*(?:\.\d+)?\)?|-?\(?\d+(?:\.\d+)?\)?|\.\d+`;
 
@@ -73,7 +73,7 @@ function isoFromAnyDate(s) {
   return `${m[3]}-${String(b).padStart(2, '0')}-${String(a).padStart(2, '0')}`;
 }
 
-function isInternalTransferLike(t) {
+function getInternalTransferReason(t) {
   const m = String(`${t.merchant || ''} ${t.reference || ''}`).toUpperCase();
 
   if (
@@ -82,45 +82,65 @@ function isInternalTransferLike(t) {
     /CREDIT\s*CARD\s*PAYMNT/.test(m) ||
     /CREDIT\s*CARD\s*PAYMENT/.test(m) ||
     /CARD\s*PAYMENT/.test(m) ||
-    /PAYMENT\s*TO\s*CARD/.test(m) ||
-    /FTS\s*&\s*SWIFT/.test(m)
+    /PAYMENT\s*TO\s*CARD/.test(m)
   ) {
-    return true;
+    return 'Credit-card settlement/payment ignored to avoid double-counting card expenses.';
+  }
+
+  if (/FTS\s*&\s*SWIFT/.test(m)) {
+    return 'Bank/card settlement transfer ignored from P/L.';
   }
 
   if (
     /\bB\/O\s+BASIL\b/.test(m) ||
     /\bBASIL\s+ABRAHAM\b/.test(m) ||
+    /\bOUT\s+TO\s+BASIL\b/.test(m)
+  ) {
+    return 'Self-transfer involving Basil account ignored from P/L.';
+  }
+
+  if (
     /\bB\/O\s+SEENA\b/.test(m) ||
     /\bSEENA\s+BASIL\b/.test(m) ||
-    /\bOUT\s+TO\s+BASIL\b/.test(m) ||
-    /\bOUT\s+TO\s+SEENA\b/.test(m) ||
+    /\bOUT\s+TO\s+SEENA\b/.test(m)
+  ) {
+    return 'Family/internal transfer involving Seena ignored from P/L.';
+  }
+
+  if (
     /\bTRF\s+OUT\s+TO\b/.test(m) ||
     (/\bMBTRF\b/.test(m) && /\bTRF\b/.test(m)) ||
     /\bSEND\s+MONEY\s+VIA\s+AANI\b/.test(m)
   ) {
-    return true;
+    return 'Mobile/bank transfer treated as internal or user-review transfer and ignored from P/L.';
   }
 
   if (
     /\bALLIANCE\s+INSURANCE\b/.test(m) ||
     /\bB\/O\s+ALLIANCE\b/.test(m)
   ) {
-    return true;
+    return 'Alliance credit marked uncertain by user rule and ignored pending review.';
   }
 
-  return false;
+  return null;
+}
+
+function isInternalTransferLike(t) {
+  return Boolean(getInternalTransferReason(t));
 }
 
 function categorizeTxn(t) {
   const out = { ...t };
 
-  if (isInternalTransferLike(out)) {
+  const internalReason = getInternalTransferReason(out);
+
+  if (internalReason) {
     out.cat = 'internal_transfer';
     out.sub = 'ignored';
     out.type = 'card_or_internal_payment';
     out.freq = 'adhoc';
     out.excluded_from_pl = true;
+    out.exclusion_reason = internalReason;
     return out;
   }
 
@@ -131,6 +151,7 @@ function categorizeTxn(t) {
     out.freq = 'adhoc';
     out.excluded_from_pl = true;
     out.note = 'Excluded because balance validation failed.';
+    out.exclusion_reason = `Excluded because running-balance validation failed. Balance check: ${out.validation.balance_check || 'failed'}. Difference: ${out.validation.balance_diff ?? 'unknown'}.`;
     return out;
   }
 
@@ -140,6 +161,7 @@ function categorizeTxn(t) {
     out.type = 'credit';
     out.freq = 'adhoc';
     out.excluded_from_pl = false;
+    out.exclusion_reason = null;
     return out;
   }
 
@@ -148,6 +170,7 @@ function categorizeTxn(t) {
   out.type = 'debit';
   out.freq = 'adhoc';
   out.excluded_from_pl = false;
+  out.exclusion_reason = null;
   return out;
 }
 
@@ -655,7 +678,7 @@ async function handleExtract(req, res) {
     });
   }
 
-    const looksLikeAccountStatement =
+  const looksLikeAccountStatement =
     /ACCOUNT\s+STATEMENT/i.test(`${filename || ''} ${text || ''}`) ||
     (
       /POSTING\s+DATE/i.test(text || '') &&
