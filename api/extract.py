@@ -8,7 +8,7 @@ import traceback
 import pdfplumber
 
 
-VERSION = "pdfplumber-extract-v19c-table-plus-text-fallback"
+VERSION = "pdfplumber-extract-v19d-table-plus-text-fallback"
 
 
 def cors_headers(handler):
@@ -354,6 +354,7 @@ def classify_row_hint(text):
         or "TRF OUT" in u
         or "INSTALLMENT RECOVERY" in u
         or "INSTALMENT RECOVERY" in u
+        or re.search(r"\b112000017920", u)
     ):
         return "DR"
 
@@ -383,14 +384,26 @@ def score_amount_triple(rest, tokens, i):
 
     score = 0
 
-    # Prefer triples closer to the end, but allow one tiny trailing split-reference.
     trailing = tokens[i + 3:]
     trailing_noise = all(token_is_reference_noise(t) for t in trailing)
 
+    # Normal case: the triple ends the row.
     if not trailing:
         score += 20
+
+    # Important account-statement case:
+    # amount | 0.00 | balance | tiny trailing reference
+    # Example: 1639 | 0.00 | 10170.6 | 0881
+    # This must beat the later wrong triple: 0.00 | 10170.6 | 0881.
     elif len(trailing) <= 2 and trailing_noise:
-        score += 15
+        score += 24
+
+        if direction == "DR" and b_zero and ("." in c["raw"] or "," in c["raw"]):
+            score += 18
+
+        if direction == "CR" and a_zero and ("." in c["raw"] or "," in c["raw"]):
+            score += 8
+
     else:
         score -= 20 + len(trailing) * 5
 
@@ -401,11 +414,14 @@ def score_amount_triple(rest, tokens, i):
 
     # Prefer balances with decimals, but do not require them.
     if "." in balance or "," in balance:
-        score += 4
+        score += 6
 
-    # Avoid treating a tiny reference as a balance.
-    if token_is_reference_noise(c) and c["value"] < 1000:
-        score -= 15
+    # Strongly avoid treating a tiny trailing reference as a balance.
+    if token_is_reference_noise(c):
+        if c["value"] < 1000:
+            score -= 40
+        else:
+            score -= 10
 
     # Avoid amount fields that look like long references.
     if token_is_reference_noise(a) and not a_zero:
