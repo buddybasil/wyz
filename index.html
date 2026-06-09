@@ -37,6 +37,7 @@ table{width:100%;border-collapse:collapse;font-size:13px}
 th,td{border-bottom:1px solid #e7e0d7;padding:10px;text-align:left;white-space:nowrap;vertical-align:top}
 th{background:#fbfaf7;position:sticky;top:0}
 .desc{white-space:normal;min-width:330px}
+.reason{white-space:normal;min-width:360px;color:#5f5a54}
 .tag{display:inline-block;border-radius:999px;padding:3px 8px;font-weight:700;font-size:12px;background:#f2eee8}
 .CR{background:#e9f8ef;color:#087644}
 .DR{background:#fff0ed;color:#a83225}
@@ -51,13 +52,13 @@ details summary{cursor:pointer;font-weight:800}
 <body>
 <header class="top">
   <div class="brand">Wyz</div>
-  <div class="pill">v19 · pdfplumber table extraction · validated</div>
+  <div class="pill">v19d · pdfplumber extraction · reasons enabled</div>
 </header>
 
 <main class="wrap">
   <section class="card">
     <h1>Upload your statements</h1>
-    <p>PDF, CSV, or TXT. PDFs are first processed through pdfplumber table extraction. Balance is never used as a transaction amount.</p>
+    <p>PDF, CSV, or TXT. PDFs are first processed through pdfplumber table extraction. Balance is never used as a transaction amount. Ignored/excluded rows include a reason.</p>
 
     <input id="fileInput" type="file" multiple accept=".pdf,.csv,.txt" hidden>
 
@@ -100,7 +101,7 @@ details summary{cursor:pointer;font-weight:800}
       <h2>Transactions</h2>
       <div class="tools">
         <div class="row">
-          <input id="search" placeholder="Search description/reference/status">
+          <input id="search" placeholder="Search description/reference/status/reason">
           <select id="catFilter">
             <option value="">All categories</option>
             <option value="income">Income</option>
@@ -129,6 +130,7 @@ details summary{cursor:pointer;font-weight:800}
               <th>Reference</th>
               <th>Amount</th>
               <th>Category</th>
+              <th class="reason">Reason</th>
               <th>Balance check</th>
               <th>File</th>
             </tr>
@@ -141,7 +143,7 @@ details summary{cursor:pointer;font-weight:800}
 </main>
 
 <script>
-const STORAGE_KEY = 'wyz.saved.generic.v19';
+const STORAGE_KEY = 'wyz.saved.generic.v19d';
 const API_ANALYZE = '/api/analyze';
 const API_EXTRACT = '/api/extract';
 
@@ -465,7 +467,9 @@ function getVisibleRows() {
       !q ||
       String(t.merchant || '').toLowerCase().includes(q) ||
       String(t.reference || '').toLowerCase().includes(q) ||
-      String(t.validation?.balance_check || '').toLowerCase().includes(q)
+      String(t.validation?.balance_check || '').toLowerCase().includes(q) ||
+      String(t.exclusion_reason || '').toLowerCase().includes(q) ||
+      String(t.note || '').toLowerCase().includes(q)
     ) &&
     (!c || t.cat === c)
   );
@@ -477,6 +481,7 @@ function renderTable() {
   el('tbody').innerHTML = rows.map(t => {
     const check = t.validation?.balance_check || '';
     const tagClass = t.cat === 'internal_transfer' ? 'internal' : (check === 'failed' ? 'review' : '');
+    const reason = t.exclusion_reason || t.note || '';
 
     return `
       <tr>
@@ -488,6 +493,7 @@ function renderTable() {
         <td>${escapeHtml(t.reference || '')}</td>
         <td>${money(t.amount)}</td>
         <td><span class="tag ${tagClass}">${escapeHtml(labelCategory(t.cat))}</span></td>
+        <td class="reason">${escapeHtml(reason)}</td>
         <td>${escapeHtml(check)}</td>
         <td>${escapeHtml(t._file || '')}</td>
       </tr>
@@ -530,15 +536,23 @@ function moveSelectedTo(cat) {
     if (cat === 'internal_transfer') {
       t.excluded_from_pl = true;
       t.type = 'ignored_transfer';
+      t.exclusion_reason = 'Manually moved to Ignored by user review.';
+      t.note = 'Manually moved to Ignored by user review.';
     } else if (cat === 'savings_investments') {
       t.excluded_from_pl = false;
       t.type = 'saving_or_investment';
+      t.exclusion_reason = null;
+      t.note = null;
     } else if (cat === 'income') {
       t.excluded_from_pl = false;
       t.type = 'credit';
+      t.exclusion_reason = null;
+      t.note = null;
     } else {
       t.excluded_from_pl = false;
       t.type = 'debit';
+      t.exclusion_reason = null;
+      t.note = null;
     }
   }
 
@@ -574,6 +588,8 @@ el('downloadCsv').onclick = () => {
     'cat',
     'sub',
     'type',
+    'exclusion_reason',
+    'note',
     'file',
     'parser',
     'statement_type',
@@ -581,6 +597,7 @@ el('downloadCsv').onclick = () => {
     'credit',
     'balance',
     'balance_check',
+    'balance_diff',
     'excluded_from_pl',
     'raw'
   ];
@@ -592,6 +609,7 @@ el('downloadCsv').onclick = () => {
       if (k === 'seq') v = t._globalSeq;
       else if (k === 'file') v = t._file;
       else if (k === 'balance_check') v = t.validation?.balance_check;
+      else if (k === 'balance_diff') v = t.validation?.balance_diff;
       else v = t[k];
 
       return csvCell(v);
